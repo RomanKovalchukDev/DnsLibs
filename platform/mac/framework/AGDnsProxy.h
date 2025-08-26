@@ -545,6 +545,11 @@ typedef NS_ENUM(NSInteger, AGDnsOutboundProxyProtocol) {
  * WARNING: may increase data usage and probability of TCP fallbacks.
  */
 @property(nonatomic) BOOL enableDNSSECOK;
+
+/**
+ * Device ID for the DNS proxy instance.
+ */
+@property(nonatomic, nullable) NSString *ednsDeviceID;
 /**
  * If enabled, detect retransmitted requests and handle them using fallback upstreams only.
  */

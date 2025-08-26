@@ -649,6 +649,8 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
 
     bool is_our_do_bit = m_settings->enable_dnssec_ok && DnssecHelpers::set_do_bit(ctx.request.get());
 
+    DnsEDNS0Helpers::set_edns_data(ctx.request.get(), m_settings->edns_device_id);
+
     UpstreamExchangeResult exchange_result;
 
     // Don't do upstream exchange for transparent filtering

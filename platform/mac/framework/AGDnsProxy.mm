@@ -683,6 +683,9 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _upstreamTimeoutMs = settings->upstream_timeout.count();
     _optimisticCache = settings->optimistic_cache;
     _enableDNSSECOK = settings->enable_dnssec_ok;
+    if (settings->edns_device_id.has_value()) {
+        _ednsDeviceID = convert_string(settings->edns_device_id.value());
+    }
     _enableRetransmissionHandling = settings->enable_retransmission_handling;
     _enableRouteResolver = settings->enable_route_resolver;
     _blockEch = settings->block_ech;
@@ -721,6 +724,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _upstreamTimeoutMs = [coder decodeInt64ForKey:@"_upstreamTimeoutMs"];
         _optimisticCache = [coder decodeBoolForKey:@"_optimisticCache"];
         _enableDNSSECOK = [coder decodeBoolForKey:@"_enableDNSSECOK"];
+        _ednsDeviceID = [coder decodeObjectOfClass:NSString.class forKey:@"_ednsDeviceID"];
         _enableRetransmissionHandling = [coder decodeBoolForKey:@"_enableRetransmissionHandling"];
         _enableRouteResolver = [coder decodeBoolForKey:@"_enableRouteResolver"];
         _blockEch = [coder decodeBoolForKey:@"_blockEch"];
