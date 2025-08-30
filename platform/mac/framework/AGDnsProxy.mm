@@ -859,6 +859,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _cacheHit = event.cache_hit;
 
     _dnssec = event.dnssec;
+    _edeErrorCode = event.ede_error_code ? [NSNumber numberWithInt:*event.ede_error_code] : nil;
 
     return self;
 }
@@ -887,6 +888,11 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         event.upstream_id = _upstreamId.intValue;
     }
     event.whitelist = _whitelist;
+    
+    if (_edeErrorCode) {
+        event.ede_error_code = _edeErrorCode.intValue;
+    }
+
     return event;
 }
 
@@ -909,6 +915,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _error = [coder decodeObjectOfClass:NSString.class forKey:@"_error"];
         _cacheHit = [coder decodeBoolForKey:@"_cacheHit"];
         _dnssec = [coder decodeBoolForKey:@"_dnssec"];
+        _edeErrorCode = [coder decodeObjectOfClass:NSNumber.class forKey:@"_edeErrorCode"];
     }
 
     return self;
@@ -931,6 +938,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeObject:self.error forKey:@"_error"];
     [coder encodeBool:self.cacheHit forKey:@"_cacheHit"];
     [coder encodeBool:self.dnssec forKey:@"_dnssec"];
+    [coder encodeObject:self.edeErrorCode forKey:@"_edeErrorCode"];
 }
 
 - (NSString*)description {

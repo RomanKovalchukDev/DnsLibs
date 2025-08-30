@@ -32,6 +32,7 @@ struct DnsRequestProcessedEvent {
     std::string error; /**< If not empty, contains the error text (occurred while processing the DNS query) */
     bool cache_hit = false; /**< True if this response was served from the cache */
     bool dnssec = false; /**< True if this response has DNSSEC rrsig */
+    std::optional<uint8_t> ede_error_code; /**< If not empty, contains the EDE error code (if provided by upstream) */
 };
 
 /**
