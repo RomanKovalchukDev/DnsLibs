@@ -1,7 +1,7 @@
 #include "common/defs.h"
 #include "common/utils.h"
 #include "dns_forwarder_utils.h"
-
+#include <ldns/ldns.h>
 namespace ag::dns {
 
 std::string DnsForwarderUtils::rr_list_to_string(const ldns_rr_list *rr_list) {
@@ -34,5 +34,10 @@ std::string DnsForwarderUtils::rr_list_to_string(const ldns_rr_list *rr_list) {
     }
     return out;
 }
+
+ldns_rdf * DnsForwarderUtils::log_ends0_options(const ldns_pkt *packet) {
+    ldns_rdf * ednsdata = ldns_pkt_edns_data(packet);
+    return ednsdata;
+};
 
 } // namespace ag::dns

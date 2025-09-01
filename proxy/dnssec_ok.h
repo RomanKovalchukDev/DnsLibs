@@ -105,3 +105,20 @@ private:
 };
 
 } // namespace ag::dns
+namespace ag::dns {
+    class DnsEDNS0Helpers {
+        public:
+        static bool set_edns_data(ldns_pkt *request, std::optional<std::string> edns_device_id) {
+            // Set EDNS0 options in the request
+            if (edns_device_id) {
+                ldns_rdf *edns_data;
+                edns_data = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_HEX, edns_device_id->c_str());
+                ldns_pkt_set_edns_data(request, edns_data);
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+    };
+}

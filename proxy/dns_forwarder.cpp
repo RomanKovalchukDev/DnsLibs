@@ -188,6 +188,7 @@ void DnsForwarder::finalize_processed_event(DnsRequestProcessedEvent &event, con
         auto status = AllocatedPtr<char>(ldns_pkt_rcode2str(ldns_pkt_get_rcode(response)));
         event.status = status != nullptr ? status.get() : "";
         event.answer = DnsForwarderUtils::rr_list_to_string(ldns_pkt_answer(response));
+        event.ede_error_code = response->_edns_extended_rcode;
     } else {
         event.status.clear();
         event.answer.clear();
@@ -648,6 +649,8 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
     }
 
     bool is_our_do_bit = m_settings->enable_dnssec_ok && DnssecHelpers::set_do_bit(ctx.request.get());
+
+    DnsEDNS0Helpers::set_edns_data(ctx.request.get(), m_settings->edns_device_id);
 
     UpstreamExchangeResult exchange_result;
 
