@@ -64,7 +64,7 @@ private:
     class RemoveEchAction : public SvcbHttpsAction {
     public:
         void duringProcessing(ProcessingContext &context) override {
-            if (context.key == LDNS_SVCPARAM_KEY_ECHCONFIG) {
+            if (context.key == LDNS_SVCPARAM_KEY_ECH) {
                 removed = true;
                 std::memmove(context.param_start, context.params_tail.data(), context.params_tail.size());
                 ldns_rdf_set_size(context.params,
