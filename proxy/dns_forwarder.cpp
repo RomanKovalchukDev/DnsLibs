@@ -188,7 +188,7 @@ void DnsForwarder::finalize_processed_event(DnsRequestProcessedEvent &event, con
         auto status = AllocatedPtr<char>(ldns_pkt_rcode2str(ldns_pkt_get_rcode(response)));
         event.status = status != nullptr ? status.get() : "";
         event.answer = DnsForwarderUtils::rr_list_to_string(ldns_pkt_answer(response));
-        event.ede_error_code = response->_edns_extended_rcode;
+        event.edns_status_code = response->_edns_extended_rcode;
     } else {
         event.status.clear();
         event.answer.clear();
@@ -700,6 +700,8 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
     event.bytes_received = ldns_pkt_size(ctx.response.get());
     event.dnssec = finalize_dnssec_log_logic(ctx.response.get(), is_our_do_bit);
 
+    event.ede_options = get_ends0_options(ctx.response.get());
+
     if (LDNS_RCODE_NOERROR == ldns_pkt_get_rcode(ctx.response.get())) {
         auto filter_response =
                 co_await handle_response(ctx, selected_upstream, normalized_domain, type, opt_as_ptr(info));
@@ -720,6 +722,48 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
         m_response_cache.put(ctx.request.get(), std::move(ctx.response), selected_upstream->options().id);
     }
     co_return {std::move(response_wire), std::move(event)};
+}
+
+std::vector< ag::dns::EDEOptionResult> DnsForwarder::get_ends0_options(const ldns_pkt *packet) {
+    std::vector< ag::dns::EDEOptionResult> results;
+
+    if (packet == nullptr) {
+        return results;
+    }
+
+    ldns_rdf * ednsdata = ldns_pkt_edns_data(packet);
+    ldns_edns_option_list * option_list = ldns_pkt_edns_get_option_list(const_cast<ldns_pkt *>(packet));
+
+    if (option_list == nullptr) {
+        return results;
+    }
+
+    size_t count = ldns_edns_option_list_get_count(option_list);
+    for (size_t i = 0; i < count; ++i) {
+        ldns_edns_option * option = ldns_edns_option_list_get_option(option_list, i);
+
+        if (option == nullptr) {
+            continue;
+        }
+
+        if (ldns_edns_get_code(option) == LDNS_EDNS_EDE) {
+            uint16_t ede_code = 0;
+            char * ede_text = nullptr;
+            if (ldns_edns_ede_get_code(option, &ede_code) == LDNS_STATUS_OK) {
+                if (ldns_edns_ede_get_text(option, &ede_text) != LDNS_STATUS_OK) {
+                    ede_text = nullptr;
+                }
+
+                results.push_back({ede_code, ede_text ? ede_text : ""});
+                LDNS_FREE(ede_text);
+            } 
+            else {
+                dbglog(m_log, "Malformed EDNS EDE option found");
+            }
+        }
+    }
+
+    return results;
 }
 
 coro::Task<ldns_pkt_ptr> DnsForwarder::apply_cname_filter(FilterContext &ctx, const ldns_rr *cname_rr) {

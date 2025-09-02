@@ -10,6 +10,10 @@
 
 namespace ag::dns {
 
+struct EDEOptionResult {
+    uint16_t code = 0;
+    std::string text;
+};
 
 /**
  * DNS request processed event
@@ -32,7 +36,8 @@ struct DnsRequestProcessedEvent {
     std::string error; /**< If not empty, contains the error text (occurred while processing the DNS query) */
     bool cache_hit = false; /**< True if this response was served from the cache */
     bool dnssec = false; /**< True if this response has DNSSEC rrsig */
-    std::optional<uint8_t> ede_error_code; /**< If not empty, contains the EDE error code (if provided by upstream) */
+    std::optional<uint8_t> edns_status_code; /**< If not empty, contains the EDE status code (if provided by upstream) */
+    std::vector<ag::dns::EDEOptionResult> ede_options; /**< If not empty, contains the EDE options (if provided by upstream) */
 };
 
 /**

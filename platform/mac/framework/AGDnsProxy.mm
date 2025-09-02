@@ -266,6 +266,28 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     return native;
 }
 
+@implementation AGEDEOption
+
++ (BOOL)supportsSecureCoding {
+    return YES;
+}
+
+- (instancetype)initWithCoder:(NSCoder *)coder {
+    self = [super init];
+    if (self) {
+        _code = [coder decodeIntegerForKey:@"_code"];
+        _text = [coder decodeObjectOfClass:NSString.class forKey:@"_text"];
+    }
+    return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeInteger:self.code forKey:@"_code"];
+    [coder encodeObject:self.text forKey:@"_text"];
+}
+
+@end
+
 @implementation AGDnsUpstream
 
 + (BOOL)supportsSecureCoding {
@@ -859,7 +881,18 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _cacheHit = event.cache_hit;
 
     _dnssec = event.dnssec;
-    _edeErrorCode = event.ede_error_code ? [NSNumber numberWithInt:*event.ede_error_code] : nil;
+    _ednsStatusCode = event.edns_status_code ? [NSNumber numberWithInt:*event.edns_status_code] : nil;
+
+    NSMutableArray<AGEDEOption *> *edeOptions = [[NSMutableArray alloc] initWithCapacity: event.ede_options.size()];
+
+    for (size_t i = 0; i < event.ede_options.size(); ++i) {
+        AGEDEOption *edeOption = [[AGEDEOption alloc] init];
+        edeOption.code = event.ede_options[i].code;
+        edeOption.text = convert_string(event.ede_options[i].text);
+        [edeOptions addObject:edeOption];
+    }
+
+    _edeOptions = edeOptions;
 
     return self;
 }
@@ -889,8 +922,15 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     }
     event.whitelist = _whitelist;
     
-    if (_edeErrorCode) {
-        event.ede_error_code = _edeErrorCode.intValue;
+    if (_ednsStatusCode) {
+        event.edns_status_code = _ednsStatusCode.intValue;
+    }
+
+    for (AGEDEOption *option in _edeOptions) {
+        ag::dns::EDEOptionResult edeOption;  // Fixed: removed pointer, made it a stack object
+        edeOption.code = option.code;
+        edeOption.text = convert_string(option.text);
+        event.ede_options.emplace_back(edeOption);
     }
 
     return event;
@@ -915,7 +955,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _error = [coder decodeObjectOfClass:NSString.class forKey:@"_error"];
         _cacheHit = [coder decodeBoolForKey:@"_cacheHit"];
         _dnssec = [coder decodeBoolForKey:@"_dnssec"];
-        _edeErrorCode = [coder decodeObjectOfClass:NSNumber.class forKey:@"_edeErrorCode"];
+        _ednsStatusCode = [coder decodeObjectOfClass:NSNumber.class forKey:@"_ednsStatusCode"];
+        _edeOptions = [coder decodeObjectOfClasses:[[NSSet alloc] initWithObjects:NSArray.class, AGEDEOption.class, nil] forKey:@"_edeOptions"];    
     }
 
     return self;
@@ -938,7 +979,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeObject:self.error forKey:@"_error"];
     [coder encodeBool:self.cacheHit forKey:@"_cacheHit"];
     [coder encodeBool:self.dnssec forKey:@"_dnssec"];
-    [coder encodeObject:self.edeErrorCode forKey:@"_edeErrorCode"];
+    [coder encodeObject:self.ednsStatusCode forKey:@"_ednsStatusCode"];
+    [coder encodeObject:self.edeOptions forKey:@"_edeOptions"];
 }
 
 - (NSString*)description {

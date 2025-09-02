@@ -47,6 +47,8 @@ private:
 
     void truncate_response(ldns_pkt *response, const ldns_pkt *request, const DnsMessageInfo *info);
 
+    std::vector<EDEOptionResult> get_ends0_options(const ldns_pkt *packet);
+
     coro::Task<Uint8Vector> handle_message_with_timeout(
             ldns_pkt_ptr request, std::optional<DnsMessageInfo> info, bool fallback_only);
 

@@ -345,7 +345,6 @@ static DnsRequestProcessedEvent marshal_processed_event(const ag_dns_request_pro
             event.rules.emplace_back(rule);
         }
     }
-    // event.edeErrorCode = 
     return event;
 }
 
