@@ -121,7 +121,7 @@ namespace ag::dns {
                                      const std::optional<std::string>& edns_device_id,
                                      const std::optional<std::string>& edns_subscriber_id) {
             // 1. Basic validation
-            if (!request || (!edns_device_id && !edns_subscriber_id)) {
+            if (!request || (!edns_device_id || !edns_subscriber_id)) {
                 return false;
             }
 
