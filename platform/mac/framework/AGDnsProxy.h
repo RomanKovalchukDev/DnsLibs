@@ -550,6 +550,11 @@ typedef NS_ENUM(NSInteger, AGDnsOutboundProxyProtocol) {
  * Device ID for the DNS proxy instance.
  */
 @property(nonatomic, nullable) NSString *ednsDeviceID;
+
+/**
+ * Subscriber ID for the DNS proxy instance.
+ */
+@property(nonatomic, nullable) NSString *ednsSubscriberID;
 /**
  * If enabled, detect retransmitted requests and handle them using fallback upstreams only.
  */

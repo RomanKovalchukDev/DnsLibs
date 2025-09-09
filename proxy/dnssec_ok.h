@@ -105,20 +105,84 @@ private:
 };
 
 } // namespace ag::dns
+
+#include <ldns/ldns.h>
+#include <optional>
+#include <string>
+
 namespace ag::dns {
+    // Assuming these constants are defined from your previous code
+    constexpr ldns_edns_option_code EDNS_DEVICE_ID = static_cast<ldns_edns_option_code>(65001);
+    constexpr ldns_edns_option_code EDNS_SUBSCRIBER_ID = static_cast<ldns_edns_option_code>(65075);
+
     class DnsEDNS0Helpers {
-        public:
-        static bool set_edns_data(ldns_pkt *request, std::optional<std::string> edns_device_id) {
-            // Set EDNS0 options in the request
-            if (edns_device_id) {
-                ldns_rdf *edns_data;
-                edns_data = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_HEX, edns_device_id->c_str());
-                ldns_pkt_set_edns_data(request, edns_data);
-                return true;
-            }
-            else {
+    public:
+        static bool set_edns_options(ldns_pkt *request,
+                                     const std::optional<std::string>& edns_device_id,
+                                     const std::optional<std::string>& edns_subscriber_id) {
+            // 1. Basic validation
+            if (!request || (!edns_device_id && !edns_subscriber_id)) {
                 return false;
             }
+
+            // 2. Ensure EDNS is properly initialized
+            if (ldns_pkt_edns_udp_size(request) == 0) {
+                ldns_pkt_set_edns_udp_size(request, UDP_RECV_BUF_SIZE);
+            }
+
+            // 3. Get or create EDNS option list
+            ldns_edns_option_list *option_list = ldns_pkt_edns_get_option_list(request);
+
+            if (!option_list) {
+                option_list = ldns_edns_option_list_new();
+                if (!option_list) {
+                    return false;
+                }
+                ldns_pkt_set_edns_option_list(request, option_list);
+            }
+
+            // 4. Add device ID option
+            if (edns_device_id) {
+                auto device_id = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_HEX, edns_device_id->c_str());
+                // Create EDNS option directly with the copied data
+                ldns_edns_option *device_option = ldns_edns_new(EDNS_DEVICE_ID, 
+                                                                device_id->_size, 
+                                                                device_id->_data);
+                if (!device_option) {
+                    ldns_rdf_free(device_id);  // Clean up if creation failed
+                    return false;
+                }
+                
+                // Add to option list
+                if (!ldns_edns_option_list_push(option_list, device_option)) {
+                    ldns_rdf_free(device_id);
+                    ldns_edns_free(device_option);  // This will also free data_copy
+                    return false;
+                }
+            }
+
+            // 5. Add subscriber ID option
+            if (edns_subscriber_id) {
+                auto subscriber_id = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_HEX, edns_subscriber_id->c_str());
+                // Create EDNS option directly with the copied data
+                ldns_edns_option *subscriber_option = ldns_edns_new(EDNS_SUBSCRIBER_ID, 
+                                                                    subscriber_id->_size, 
+                                                                    subscriber_id->_data);
+
+                if (!subscriber_option) {
+                    ldns_rdf_free(subscriber_id);  // Clean up if creation failed
+                    return false;
+                }
+                
+                // Add to option list
+                if (!ldns_edns_option_list_push(option_list, subscriber_option)) {
+                    ldns_rdf_free(subscriber_id);
+                    ldns_edns_free(subscriber_option);  // This will also free data_copy
+                    return false;
+                }
+            }
+
+            return true;
         }
     };
 }

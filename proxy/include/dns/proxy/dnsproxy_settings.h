@@ -187,6 +187,11 @@ struct DnsProxySettings {
      */
     std::optional<std::string> edns_device_id;
 
+    /**
+     * EDNS subscriber ID to include in requests.
+     */
+    std::optional<std::string> edns_subscriber_id;
+
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     /** QoS class and relative priority for threads on iOS. */
     DnsQosSettings qos_settings;

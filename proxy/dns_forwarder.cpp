@@ -649,8 +649,7 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
     }
 
     bool is_our_do_bit = m_settings->enable_dnssec_ok && DnssecHelpers::set_do_bit(ctx.request.get());
-
-    DnsEDNS0Helpers::set_edns_data(ctx.request.get(), m_settings->edns_device_id);
+    auto optionAdded = DnsEDNS0Helpers::set_edns_options(ctx.request.get(), m_settings->edns_device_id, m_settings->edns_subscriber_id);
 
     UpstreamExchangeResult exchange_result;
 
@@ -699,8 +698,8 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
     event.bytes_sent = ldns_pkt_size(ctx.request.get());
     event.bytes_received = ldns_pkt_size(ctx.response.get());
     event.dnssec = finalize_dnssec_log_logic(ctx.response.get(), is_our_do_bit);
-
     event.ede_options = get_ends0_options(ctx.response.get());
+    
 
     if (LDNS_RCODE_NOERROR == ldns_pkt_get_rcode(ctx.response.get())) {
         auto filter_response =
@@ -712,7 +711,6 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
             co_return {transform_response_to_raw_data(filter_response.get()), std::move(event)};
         }
     }
-
     truncate_response(ctx.response.get(), ctx.request.get(), opt_as_ptr(info));
     finalize_processed_event(event, ctx.request.get(), ctx.response.get(), nullptr,
             selected_upstream ? std::make_optional(selected_upstream->options().id) : std::nullopt);

@@ -97,6 +97,7 @@ static const DnsProxySettings DEFAULT_PROXY_SETTINGS = {
         .optimistic_cache = true,
         .enable_dnssec_ok = false,
         .edns_device_id = std::nullopt,
+        .edns_subscriber_id = std::nullopt,
         .enable_retransmission_handling = false,
         .block_ech = false,
         .enable_route_resolver = false,

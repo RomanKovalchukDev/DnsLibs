@@ -708,6 +708,9 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     if (settings->edns_device_id.has_value()) {
         _ednsDeviceID = convert_string(settings->edns_device_id.value());
     }
+    if (settings->edns_subscriber_id.has_value()) {
+        _ednsSubscriberID = convert_string(settings->edns_subscriber_id.value());
+    }
     _enableRetransmissionHandling = settings->enable_retransmission_handling;
     _enableRouteResolver = settings->enable_route_resolver;
     _blockEch = settings->block_ech;
@@ -747,6 +750,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _optimisticCache = [coder decodeBoolForKey:@"_optimisticCache"];
         _enableDNSSECOK = [coder decodeBoolForKey:@"_enableDNSSECOK"];
         _ednsDeviceID = [coder decodeObjectOfClass:NSString.class forKey:@"_ednsDeviceID"];
+        _ednsSubscriberID = [coder decodeObjectOfClass:NSString.class forKey:@"_ednsSubscriberID"];
         _enableRetransmissionHandling = [coder decodeBoolForKey:@"_enableRetransmissionHandling"];
         _enableRouteResolver = [coder decodeBoolForKey:@"_enableRouteResolver"];
         _blockEch = [coder decodeBoolForKey:@"_blockEch"];
@@ -1527,6 +1531,14 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
     settings.enable_parallel_upstream_queries = config.enableParallelUpstreamQueries;
     settings.enable_fallback_on_upstreams_failure = config.enableFallbackOnUpstreamsFailure;
     settings.enable_servfail_on_upstreams_failure = config.enableServfailOnUpstreamsFailure;
+    
+    if (config.ednsDeviceID != nil) {
+        settings.edns_device_id = config.ednsDeviceID.UTF8String;
+    }
+
+    if (config.ednsSubscriberID != nil) {
+        settings.edns_subscriber_id = config.ednsSubscriberID.UTF8String;
+    }
 
 #if TARGET_OS_IPHONE
     settings.qos_settings.qos_class = config.qosSettings.qosClass;
@@ -1551,8 +1563,6 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
                                  userInfo:@{NSLocalizedDescriptionKey : convert_string(str)}];
     }
     self->initialized = YES;
-
-    infolog(*self->log, "Dns proxy initialized");
 
     return self;
 }
