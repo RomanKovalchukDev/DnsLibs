@@ -29,7 +29,6 @@ class DnsLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
-<<<<<<< HEAD
         self.requires("libevent/2.1.11@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("libsodium/1.0.18@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("libuv/1.41.0@adguard_team/native_libs_common", transitive_headers=True)
@@ -40,18 +39,6 @@ class DnsLibsConan(ConanFile):
         self.requires("ngtcp2/1.0.1@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("pcre2/10.37@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("tldregistry/2022-12-26@adguard_team/native_libs_common", transitive_headers=True)
-=======
-        self.requires("libevent/2.1.11@adguard/oss", transitive_headers=True)
-        self.requires("libsodium/1.0.18@adguard/oss", transitive_headers=True)
-        self.requires("libuv/1.41.0@adguard/oss", transitive_headers=True)
-        self.requires("klib/2021-04-06@adguard/oss", transitive_headers=True)
-        self.requires("ldns/2021-03-29@adguard/oss", transitive_headers=True)
-        self.requires("magic_enum/0.9.5", transitive_headers=True)
-        self.requires("native_libs_common/7.0.34@adguard/oss", transitive_headers=True)
-        self.requires("ngtcp2/1.0.1@adguard/oss", transitive_headers=True)
-        self.requires("pcre2/10.37@adguard/oss", transitive_headers=True)
-        self.requires("tldregistry/2022-12-26@adguard/oss", transitive_headers=True)
->>>>>>> 7c47dbd5785534478f7d6b8360e2405b0eb6a80c
         if "mips" in str(self.settings.arch):
             self.requires("openssl/3.1.5-quic1@adguard/oss", transitive_headers=True, force=True)
         else:
