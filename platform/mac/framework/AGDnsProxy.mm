@@ -51,7 +51,7 @@ static std::string convert_string(NSString *str) {
     return "";
 }
 
-NSErrorDomain const AGDnsProxyErrorDomain = @"com.adguard.dnsproxy";
+NSErrorDomain const AGDnsProxyErrorDomain = @"com.cira.dnsproxy";
 
 @implementation AGDnsLogger
 + (void) setLevel: (AGDnsLogLevel) level

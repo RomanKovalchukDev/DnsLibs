@@ -67,8 +67,8 @@ set_target_properties(AGDnsProxy PROPERTIES
     FRAMEWORK_VERSION A
     VERSION 2.6.17
     MACOSX_FRAMEWORK_INFO_PLIST "${INFOPLIST_FILE}"
-    MACOSX_FRAMEWORK_IDENTIFIER com.adguard.dnsproxy
-    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application: Performiks OOO (N33TQXN8C7)"
+    MACOSX_FRAMEWORK_IDENTIFIER com.cira.dnsproxy
+    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application: Canadian Internet Registration Authority (RJLNUGZH8C)"
     INSTALL_NAME_DIR "@rpath"
     BUILD_WITH_INSTALL_RPATH 1
     COMPILE_FLAGS "-fobjc-arc"
