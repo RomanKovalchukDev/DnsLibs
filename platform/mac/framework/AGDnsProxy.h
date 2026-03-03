@@ -234,6 +234,13 @@ typedef void (^logCallback)(AGDnsLogLevel level, const char *msg, int length);
  */
 @property(nonatomic) NSInteger waitTimeMs;
 
+/**
+ * Hardcoded DNS64 prefix as an IPv6 address string (e.g., @"64:ff9b::").
+ * If non-nil, prefix discovery is skipped and this prefix is used directly.
+ * Parsed as an IPv6 address; the first 12 bytes are used as the /96 prefix.
+ */
+@property(nonatomic) NSString *prefix;
+
 - (instancetype)initWithCoder:(NSCoder *)coder;
 
 - (void)encodeWithCoder:(NSCoder *)coder;

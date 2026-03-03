@@ -5,7 +5,7 @@
     <key>CFBundleExecutable</key>
     <string>AGDnsProxy</string>
     <key>CFBundleIdentifier</key>
-    <string>com.cira.dnsproxy</string>
+    <string>ca.cira.dnsfirewall.dnsproxy</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>

@@ -24,6 +24,9 @@ struct Dns64Settings {
     uint32_t max_tries; // How many times, at most, to try DNS64 prefixes discovery before giving up
     Millis wait_time; // How long to wait before a dns64 prefixes discovery attempt
     Millis timeout; // Single discovery try timeout
+    // Hardcoded DNS64 prefixes. If non-empty, prefix discovery is skipped and these are used directly.
+    // Each prefix is a byte vector of length 4..12 (e.g., 12 bytes for a /96 prefix like 64:ff9b::).
+    std::vector<Uint8Vector> prefixes;
 };
 
 /**

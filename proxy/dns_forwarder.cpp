@@ -434,9 +434,14 @@ DnsForwarder::InitResult DnsForwarder::init(
 
     m_dns64_state = std::make_shared<dns64::State>();
     if (settings.dns64.has_value()) {
-        infolog(m_log, "DNS64 discovery is enabled");
-        coro::run_detached(discover_dns64_prefixes(settings.dns64->upstreams, settings.dns64->timeout, m_socket_factory,
-                m_dns64_state, *m_loop, settings.dns64->max_tries, settings.dns64->wait_time, m_shutdown_guard));
+        if (!settings.dns64->prefixes.empty()) {
+            infolog(m_log, "DNS64 using {} hardcoded prefix(es)", settings.dns64->prefixes.size());
+            m_dns64_state->prefixes = settings.dns64->prefixes;
+        } else {
+            infolog(m_log, "DNS64 discovery is enabled");
+            coro::run_detached(discover_dns64_prefixes(settings.dns64->upstreams, settings.dns64->timeout, m_socket_factory,
+                    m_dns64_state, *m_loop, settings.dns64->max_tries, settings.dns64->wait_time, m_shutdown_guard));
+        }
     }
 
     m_response_cache.set_capacity(m_settings->dns_cache_size);

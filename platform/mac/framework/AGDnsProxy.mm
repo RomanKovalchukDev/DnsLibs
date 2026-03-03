@@ -51,7 +51,7 @@ static std::string convert_string(NSString *str) {
     return "";
 }
 
-NSErrorDomain const AGDnsProxyErrorDomain = @"com.cira.dnsproxy";
+NSErrorDomain const AGDnsProxyErrorDomain = @"ca.cira.dnsfirewall.dnsproxy";
 
 @implementation AGDnsLogger
 + (void) setLevel: (AGDnsLogLevel) level
@@ -364,6 +364,15 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _upstreams = upstreams;
     _maxTries = settings->max_tries;
     _waitTimeMs = settings->wait_time.count();
+    if (!settings->prefixes.empty()) {
+        auto &pref = settings->prefixes.front();
+        struct in6_addr addr = {};
+        std::memcpy(&addr, pref.data(), std::min(pref.size(), sizeof(addr)));
+        char buf[INET6_ADDRSTRLEN] = {};
+        if (inet_ntop(AF_INET6, &addr, buf, sizeof(buf))) {
+            _prefix = [NSString stringWithUTF8String: buf];
+        }
+    }
     return self;
 }
 
@@ -373,6 +382,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _upstreams = [coder decodeObjectOfClasses:[[NSSet alloc] initWithObjects:NSArray.class, AGDnsUpstream.class, nil] forKey:@"_upstreams"];
         _maxTries = [coder decodeInt64ForKey:@"_maxTries"];
         _waitTimeMs = [coder decodeInt64ForKey:@"_waitTimeMs"];
+        _prefix = [coder decodeObjectOfClass:NSString.class forKey:@"_prefix"];
     }
 
     return self;
@@ -382,6 +392,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeObject:self.upstreams forKey:@"_upstreams"];
     [coder encodeInt64:self.maxTries forKey:@"_maxTries"];
     [coder encodeInt64:self.waitTimeMs forKey:@"_waitTimeMs"];
+    [coder encodeObject:self.prefix forKey:@"_prefix"];
 }
 
 - (NSString*)description {
@@ -1453,16 +1464,24 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
 
     if (config.dns64Settings != nil) {
         NSArray<AGDnsUpstream *> *dns64_upstreams = config.dns64Settings.upstreams;
-        if (dns64_upstreams == nil) {
-            dbglog(*self->log, "DNS64 upstreams list is nil");
-        } else if ([dns64_upstreams count] == 0) {
-            dbglog(*self->log, "DNS64 upstreams list is empty");
+        std::vector<Uint8Vector> native_prefixes;
+        if (config.dns64Settings.prefix != nil) {
+            struct in6_addr addr = {};
+            if (inet_pton(AF_INET6, [config.dns64Settings.prefix UTF8String], &addr) == 1) {
+                native_prefixes.emplace_back((const uint8_t *)&addr, (const uint8_t *)&addr + 12);
+            } else {
+                dbglog(*self->log, "DNS64: failed to parse prefix '{}'", [config.dns64Settings.prefix UTF8String]);
+            }
+        }
+        if (native_prefixes.empty() && (dns64_upstreams == nil || [dns64_upstreams count] == 0)) {
+            dbglog(*self->log, "DNS64 settings have no prefix and no upstreams");
         } else {
             settings.dns64 = Dns64Settings{
-                    .upstreams = convert_upstreams(dns64_upstreams),
+                    .upstreams = dns64_upstreams != nil ? convert_upstreams(dns64_upstreams) : std::vector<UpstreamOptions>{},
                     .max_tries = config.dns64Settings.maxTries > 0
                                  ? static_cast<uint32_t>(config.dns64Settings.maxTries) : 0,
                     .wait_time = std::chrono::milliseconds(config.dns64Settings.waitTimeMs),
+                    .prefixes = std::move(native_prefixes),
             };
         }
     }
