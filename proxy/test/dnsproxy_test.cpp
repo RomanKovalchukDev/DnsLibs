@@ -404,8 +404,6 @@ TEST_F(DnsProxyTest, TestDns64HardcodedPrefix) {
     ASSERT_EQ(addr[1], 0x64);
     ASSERT_EQ(addr[2], 0xff);
     ASSERT_EQ(addr[3], 0x9b);
-
-    m_proxy->deinit();
 }
 
 TEST_F(DnsProxyTest, DdrBlocking) {
@@ -2097,3 +2095,8 @@ TEST_F(DnsProxyTest, DoNotCrashOnPacketWithoutQuestion) {
 }
 
 } // namespace ag::dns::proxy::test
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
