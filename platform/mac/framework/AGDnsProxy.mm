@@ -725,10 +725,12 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _enableRetransmissionHandling = settings->enable_retransmission_handling;
     _enableRouteResolver = settings->enable_route_resolver;
     _blockEch = settings->block_ech;
+    _blockH3Alpn = settings->block_h3_alpn;
     _enableParallelUpstreamQueries = settings->enable_parallel_upstream_queries;
     _enableFallbackOnUpstreamsFailure = settings->enable_fallback_on_upstreams_failure;
     _enableServfailOnUpstreamsFailure = settings->enable_servfail_on_upstreams_failure;
     _enableHttp3 = settings->enable_http3;
+    _enablePostQuantumCryptography = settings->enable_post_quantum_cryptography;
 #if TARGET_OS_IPHONE
     _qosSettings = [[AGDnsQosSettings alloc] initWithNative: &settings->qos_settings];
 #endif // TARGET_OS_IPHONE
@@ -765,10 +767,12 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _enableRetransmissionHandling = [coder decodeBoolForKey:@"_enableRetransmissionHandling"];
         _enableRouteResolver = [coder decodeBoolForKey:@"_enableRouteResolver"];
         _blockEch = [coder decodeBoolForKey:@"_blockEch"];
+        _blockH3Alpn = [coder decodeBoolForKey:@"_blockH3Alpn"];
         _enableParallelUpstreamQueries = [coder decodeBoolForKey:@"_enableParallelUpstreamQueries"];
         _enableFallbackOnUpstreamsFailure = [coder decodeBoolForKey:@"_enableFallbackOnUpstreamsFailure"];
         _enableServfailOnUpstreamsFailure = [coder decodeBoolForKey:@"_enableServfailOnUpstreamsFailure"];
         _enableHttp3 = [coder decodeBoolForKey:@"_enableHttp3"];
+        _enablePostQuantumCryptography = [coder decodeBoolForKey:@"_enablePostQuantumCryptography"];
         _helperPath = [coder decodeObjectOfClass:NSString.class forKey:@"_helperPath"];
 #if TARGET_OS_IPHONE
         _qosSettings = [coder decodeObjectOfClass:AGDnsQosSettings.class forKey:@"_qosSettings"];
@@ -805,10 +809,12 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeBool:self.enableRetransmissionHandling forKey:@"_enableRetransmissionHandling"];
     [coder encodeBool:self.enableRouteResolver forKey:@"_enableRouteResolver"];
     [coder encodeBool:self.blockEch forKey:@"_blockEch"];
+    [coder encodeBool:self.blockH3Alpn forKey:@"_blockH3Alpn"];
     [coder encodeBool:self.enableParallelUpstreamQueries forKey:@"_enableParallelUpstreamQueries"];
     [coder encodeBool:self.enableFallbackOnUpstreamsFailure forKey:@"_enableFallbackOnUpstreamsFailure"];
     [coder encodeBool:self.enableServfailOnUpstreamsFailure forKey:@"_enableServfailOnUpstreamsFailure"];
     [coder encodeBool:self.enableHttp3 forKey:@"_enableHttp3"];
+    [coder encodeBool:self.enablePostQuantumCryptography forKey:@"_enablePostQuantumCryptography"];
     [coder encodeObject:self.helperPath forKey:@"_helperPath"];
 #if TARGET_OS_IPHONE
     [coder encodeObject:self.qosSettings forKey:@"_qosSettings"];
@@ -840,10 +846,12 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [description appendFormat:@", self.enableRetransmissionHandling=%d", self.enableRetransmissionHandling];
     [description appendFormat:@", self.enableRouteResolver=%d", self.enableRouteResolver];
     [description appendFormat:@", self.blockEch=%d", self.blockEch];
+    [description appendFormat:@", self.blockH3Alpn=%d", self.blockH3Alpn];
     [description appendFormat:@", self.enableParallelUpstreamQueries=%d", self.enableParallelUpstreamQueries];
     [description appendFormat:@", self.enableFallbackOnUpstreamsFailure=%d", self.enableFallbackOnUpstreamsFailure];
     [description appendFormat:@", self.enableServfailOnUpstreamsFailure=%d", self.enableServfailOnUpstreamsFailure];
     [description appendFormat:@", self.enableHttp3=%d", self.enableHttp3];
+    [description appendFormat:@", self.enablePostQuantumCryptography=%d", self.enablePostQuantumCryptography];
     [description appendFormat:@", self.helperPath=%@", self.helperPath];
 #if TARGET_OS_IPHONE
     [description appendFormat:@", self.qosSettings=%@", self.qosSettings];
@@ -909,6 +917,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
 
     _edeOptions = edeOptions;
 
+    _blockingReason = (NSInteger)event.blocking_reason;
+
     return self;
 }
 
@@ -920,6 +930,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     event.bytes_sent = _bytesSent;
     event.cache_hit = _cacheHit;
     event.dnssec = _dnssec;
+    event.blocking_reason = (ag::dns::DnsBlockingReason)_blockingReason;
     event.status = convert_string(_status);
     event.domain = convert_string(_domain);
     event.elapsed = _elapsed;
@@ -971,7 +982,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _cacheHit = [coder decodeBoolForKey:@"_cacheHit"];
         _dnssec = [coder decodeBoolForKey:@"_dnssec"];
         _ednsStatusCode = [coder decodeObjectOfClass:NSNumber.class forKey:@"_ednsStatusCode"];
-        _edeOptions = [coder decodeObjectOfClasses:[[NSSet alloc] initWithObjects:NSArray.class, AGEDEOption.class, nil] forKey:@"_edeOptions"];    
+        _edeOptions = [coder decodeObjectOfClasses:[[NSSet alloc] initWithObjects:NSArray.class, AGEDEOption.class, nil] forKey:@"_edeOptions"];
+        _blockingReason = [coder decodeIntegerForKey:@"_blockingReason"];
     }
 
     return self;
@@ -996,6 +1008,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeBool:self.dnssec forKey:@"_dnssec"];
     [coder encodeObject:self.ednsStatusCode forKey:@"_ednsStatusCode"];
     [coder encodeObject:self.edeOptions forKey:@"_edeOptions"];
+    [coder encodeInteger:self.blockingReason forKey:@"_blockingReason"];
 }
 
 - (NSString*)description {
@@ -1010,9 +1023,11 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
             "whitelist=%@, "
             "error=%@, "
             "cacheHit=%@, "
-            "dnssec=%@]",
+            "dnssec=%@, "
+            "blockingReason=%s]",
             self, _domain, _type, _status, _answer, _originalAnswer, _upstreamId, _filterListIds,
-            _whitelist ? @"YES" : @"NO", _error, _cacheHit ? @"YES" : @"NO", _dnssec ? @"YES" : @"NO"];
+            _whitelist ? @"YES" : @"NO", _error, _cacheHit ? @"YES" : @"NO", _dnssec ? @"YES" : @"NO",
+            magic_enum::enum_name((ag::dns::DnsBlockingReason)_blockingReason).data()];
 }
 
 @end
@@ -1077,7 +1092,7 @@ using AGUniqueCFRef = UniquePtr<std::remove_pointer_t<T>, &CFRelease>;
 
     SecCertificateRef cert = convertCertificate(event->certificate);
     if (!cert) {
-        dbglog(log, "[Verification] Failed to create certificate object");
+        warnlog(log, "[Verification] Failed to create certificate object");
         return "Failed to create certificate object";
     }
     [trustArray addObject:(__bridge_transfer id) cert];
@@ -1085,7 +1100,7 @@ using AGUniqueCFRef = UniquePtr<std::remove_pointer_t<T>, &CFRelease>;
     for (const auto &chainCert : event->chain) {
         cert = convertCertificate(chainCert);
         if (!cert) {
-            dbglog(log, "[Verification] Failed to create certificate object");
+            warnlog(log, "[Verification] Failed to create certificate object");
             return "Failed to create certificate object";
         }
         [trustArray addObject:(__bridge_transfer id) cert];
@@ -1097,7 +1112,7 @@ using AGUniqueCFRef = UniquePtr<std::remove_pointer_t<T>, &CFRelease>;
 
     if (status != errSecSuccess) {
         std::string err = getTrustCreationErrorStr(status);
-        dbglog(log, "[Verification] Failed to create trust object from chain: {}", err);
+        warnlog(log, "[Verification] Failed to create trust object from chain: {}", err);
         return err;
     }
 
@@ -1105,40 +1120,25 @@ using AGUniqueCFRef = UniquePtr<std::remove_pointer_t<T>, &CFRelease>;
 
     SecTrustSetAnchorCertificates(trust, NULL);
     SecTrustSetAnchorCertificatesOnly(trust, NO);
-    SecTrustResultType trustResult;
-    SecTrustEvaluate(trust, &trustResult);
 
-    // https://developer.apple.com/documentation/security/sectrustresulttype/ksectrustresultunspecified?language=objc
-    // This value indicates that evaluation reached an (implicitly trusted) anchor certificate without
-    // any evaluation failures, but never encountered any explicitly stated user-trust preference.
-    if (trustResult == kSecTrustResultUnspecified || trustResult == kSecTrustResultProceed) {
+    CFErrorRef cfError = NULL;
+    bool trusted = SecTrustEvaluateWithError(trust, &cfError);
+    if (trusted) {
         dbglog(log, "[Verification] Succeeded");
         return std::nullopt;
     }
-
-    std::string errStr;
-    switch (trustResult) {
-    case kSecTrustResultDeny:
-        errStr = "The user specified that the certificate should not be trusted";
-        break;
-    case kSecTrustResultRecoverableTrustFailure:
-        errStr = "Trust is denied, but recovery may be possible";
-        break;
-    case kSecTrustResultFatalTrustFailure:
-        errStr = "Trust is denied and no simple fix is available";
-        break;
-    case kSecTrustResultOtherError:
-        errStr = "A value that indicates a failure other than trust evaluation";
-        break;
-    case kSecTrustResultInvalid:
-        errStr = "An indication of an invalid setting or result";
-        break;
-    default:
-        errStr = AG_FMT("Unknown error code: {}", magic_enum::enum_name(trustResult));
-        break;
+    NSError *nsError = (__bridge_transfer NSError *)cfError;
+    std::string errStr = AG_FMT("{} (domain={}, code={})",
+            nsError.localizedDescription.UTF8String ?: "Unknown error",
+            nsError.domain.UTF8String ?: "?",
+            (long)nsError.code);
+    if (nsError.userInfo[NSUnderlyingErrorKey]) {
+        NSError *underlying = nsError.userInfo[NSUnderlyingErrorKey];
+        errStr += AG_FMT("; underlying: {} (code={})",
+                underlying.localizedDescription.UTF8String ?: "?",
+                (long)underlying.code);
     }
-
-    dbglog(log, "[Verification] Failed to verify: {}", errStr);
+    warnlog(log, "[Verification] Failed to verify: {}", errStr);
     return errStr;
 }
 
@@ -1383,20 +1383,7 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
     return ret;
 }
 
-- (instancetype) initWithConfig: (AGDnsProxyConfig *) config
-                        handler: (AGDnsProxyEvents *) handler
-                          error: (NSError **) error
-{
-    self = [super init];
-    if (!self) {
-        return nil;
-    }
-    self->initialized = NO;
-
-    self->log = Logger{"AGDnsProxy"};
-
-    infolog(*self->log, "Initializing dns proxy...");
-
+static DnsProxySettings convertConfig(AGDnsProxyConfig *config, const Logger &log) {
     DnsProxySettings settings = DnsProxySettings::get_default();
     settings.upstreams = convert_upstreams(config.upstreams);
     settings.fallbacks = convert_upstreams(config.fallbacks);
@@ -1415,7 +1402,7 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
     if (config.filters != nil) {
         settings.filter_params.filters.reserve([config.filters count]);
         for (AGDnsFilterParams *fp in config.filters) {
-            dbglog(*self->log, "Filter id={} {}={}", fp.id, fp.inMemory ? "content" : "path",
+            dbglog(log, "Filter id={} {}={}", fp.id, fp.inMemory ? "content" : "path",
                     fp.inMemory ? AG_FMT("{} bytes", fp.data.length) : fp.data.UTF8String);
 
             settings.filter_params.filters.emplace_back(
@@ -1425,6 +1412,87 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
         settings.filter_params.mem_limit = config.filtersMemoryLimitBytes;
 #endif // TARGET_OS_IPHONE
     }
+
+    if (config.dns64Settings != nil) {
+        NSArray<AGDnsUpstream *> *dns64_upstreams = config.dns64Settings.upstreams;
+        std::vector<Uint8Vector> native_prefixes;
+        if (config.dns64Settings.prefix != nil) {
+            struct in6_addr addr = {};
+            if (inet_pton(AF_INET6, [config.dns64Settings.prefix UTF8String], &addr) == 1) {
+                native_prefixes.emplace_back((const uint8_t *)&addr, (const uint8_t *)&addr + 12);
+            } else {
+                dbglog(log, "DNS64: failed to parse prefix '{}'", [config.dns64Settings.prefix UTF8String]);
+            }
+        }
+        if (native_prefixes.empty() && (dns64_upstreams == nil || [dns64_upstreams count] == 0)) {
+            dbglog(log, "DNS64 settings have no prefix and no upstreams");
+        } else {
+            settings.dns64 = Dns64Settings{
+                    .upstreams = dns64_upstreams != nil ? convert_upstreams(dns64_upstreams) : std::vector<UpstreamOptions>{},
+                    .max_tries = config.dns64Settings.maxTries > 0
+                                 ? static_cast<uint32_t>(config.dns64Settings.maxTries) : 0,
+                    .wait_time = std::chrono::milliseconds(config.dns64Settings.waitTimeMs),
+                    .prefixes = std::move(native_prefixes),
+            };
+        }
+    }
+
+    settings.ipv6_available = config.ipv6Available;
+    settings.block_ipv6 = config.blockIpv6;
+
+    settings.adblock_rules_blocking_mode = (DnsProxyBlockingMode) config.adblockRulesBlockingMode;
+    settings.hosts_rules_blocking_mode = (DnsProxyBlockingMode) config.hostsRulesBlockingMode;
+    if (config.customBlockingIpv4 != nil) {
+        settings.custom_blocking_ipv4 = [config.customBlockingIpv4 UTF8String];
+    }
+    if (config.customBlockingIpv6 != nil) {
+        settings.custom_blocking_ipv6 = [config.customBlockingIpv6 UTF8String];
+    }
+
+    settings.dns_cache_size = config.dnsCacheSize;
+    settings.optimistic_cache = config.optimisticCache;
+    settings.enable_dnssec_ok = config.enableDNSSECOK;
+    settings.enable_retransmission_handling = config.enableRetransmissionHandling;
+    settings.enable_route_resolver = config.enableRouteResolver;
+    settings.block_ech = config.blockEch;
+    settings.block_h3_alpn = config.blockH3Alpn;
+    settings.enable_parallel_upstream_queries = config.enableParallelUpstreamQueries;
+    settings.enable_fallback_on_upstreams_failure = config.enableFallbackOnUpstreamsFailure;
+    settings.enable_servfail_on_upstreams_failure = config.enableServfailOnUpstreamsFailure;
+    settings.enable_http3 = config.enableHttp3;
+    settings.enable_post_quantum_cryptography = config.enablePostQuantumCryptography;
+
+    if (config.ednsDeviceID != nil) {
+        settings.edns_device_id = config.ednsDeviceID.UTF8String;
+    }
+
+    if (config.ednsSubscriberID != nil) {
+        settings.edns_subscriber_id = config.ednsSubscriberID.UTF8String;
+    }
+
+#if TARGET_OS_IPHONE
+    settings.qos_settings.qos_class = config.qosSettings.qosClass;
+    settings.qos_settings.relative_priority = config.qosSettings.relativePriority;
+#endif // TARGET_OS_IPHONE
+
+    return settings;
+}
+
+- (instancetype) initWithConfig: (AGDnsProxyConfig *) config
+                        handler: (AGDnsProxyEvents *) handler
+                          error: (NSError **) error
+{
+    self = [super init];
+    if (!self) {
+        return nil;
+    }
+    self->initialized = NO;
+
+    self->log = Logger{"AGDnsProxy"};
+
+    infolog(*self->log, "Initializing dns proxy...");
+
+    DnsProxySettings settings = convertConfig(config, *self->log);
 
     void *obj = (__bridge void *)self;
 
@@ -1461,30 +1529,6 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
                 return [AGDnsProxy verifyCertificate: &event log: *sself->log];
             }
         };
-
-    if (config.dns64Settings != nil) {
-        NSArray<AGDnsUpstream *> *dns64_upstreams = config.dns64Settings.upstreams;
-        std::vector<Uint8Vector> native_prefixes;
-        if (config.dns64Settings.prefix != nil) {
-            struct in6_addr addr = {};
-            if (inet_pton(AF_INET6, [config.dns64Settings.prefix UTF8String], &addr) == 1) {
-                native_prefixes.emplace_back((const uint8_t *)&addr, (const uint8_t *)&addr + 12);
-            } else {
-                dbglog(*self->log, "DNS64: failed to parse prefix '{}'", [config.dns64Settings.prefix UTF8String]);
-            }
-        }
-        if (native_prefixes.empty() && (dns64_upstreams == nil || [dns64_upstreams count] == 0)) {
-            dbglog(*self->log, "DNS64 settings have no prefix and no upstreams");
-        } else {
-            settings.dns64 = Dns64Settings{
-                    .upstreams = dns64_upstreams != nil ? convert_upstreams(dns64_upstreams) : std::vector<UpstreamOptions>{},
-                    .max_tries = config.dns64Settings.maxTries > 0
-                                 ? static_cast<uint32_t>(config.dns64Settings.maxTries) : 0,
-                    .wait_time = std::chrono::milliseconds(config.dns64Settings.waitTimeMs),
-                    .prefixes = std::move(native_prefixes),
-            };
-        }
-    }
 
     std::vector<std::shared_ptr<void>> closefds; // Close fds on return
     if (config.listeners != nil) {
@@ -1529,41 +1573,6 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
         dbglog(*self->log, "Finished creating listener fds if needed, {} pending to close", closefds.size());
     }
 
-    settings.ipv6_available = config.ipv6Available;
-    settings.block_ipv6 = config.blockIpv6;
-
-    settings.adblock_rules_blocking_mode = (DnsProxyBlockingMode) config.adblockRulesBlockingMode;
-    settings.hosts_rules_blocking_mode = (DnsProxyBlockingMode) config.hostsRulesBlockingMode;
-    if (config.customBlockingIpv4 != nil) {
-        settings.custom_blocking_ipv4 = [config.customBlockingIpv4 UTF8String];
-    }
-    if (config.customBlockingIpv6 != nil) {
-        settings.custom_blocking_ipv6 = [config.customBlockingIpv6 UTF8String];
-    }
-
-    settings.dns_cache_size = config.dnsCacheSize;
-    settings.optimistic_cache = config.optimisticCache;
-    settings.enable_dnssec_ok = config.enableDNSSECOK;
-    settings.enable_retransmission_handling = config.enableRetransmissionHandling;
-    settings.enable_route_resolver = config.enableRouteResolver;
-    settings.block_ech = config.blockEch;
-    settings.enable_parallel_upstream_queries = config.enableParallelUpstreamQueries;
-    settings.enable_fallback_on_upstreams_failure = config.enableFallbackOnUpstreamsFailure;
-    settings.enable_servfail_on_upstreams_failure = config.enableServfailOnUpstreamsFailure;
-    
-    if (config.ednsDeviceID != nil) {
-        settings.edns_device_id = config.ednsDeviceID.UTF8String;
-    }
-
-    if (config.ednsSubscriberID != nil) {
-        settings.edns_subscriber_id = config.ednsSubscriberID.UTF8String;
-    }
-
-#if TARGET_OS_IPHONE
-    settings.qos_settings.qos_class = config.qosSettings.qosClass;
-    settings.qos_settings.relative_priority = config.qosSettings.relativePriority;
-#endif // TARGET_OS_IPHONE
-
     auto [ret, err_or_warn] = self->proxy.init(std::move(settings), std::move(native_events));
     if (!ret) {
         auto str = AG_FMT("Failed to initialize the DNS proxy: {}", err_or_warn->str());
@@ -1584,6 +1593,45 @@ static ProxySettingsOverrides convertProxySettingsOverrides(const AGDnsProxySett
     self->initialized = YES;
 
     return self;
+}
+
+- (BOOL) reapplySettings: (AGDnsProxyConfig *) config
+                 options: (AGDnsProxyReapplyOptions) options
+                   error: (NSError **) error
+{
+    if (!self->initialized) {
+        if (error) {
+            *error = [NSError errorWithDomain:AGDnsProxyErrorDomain
+                                         code:AGDPE_PROXY_NOT_SET
+                                     userInfo:@{NSLocalizedDescriptionKey: @"DNS proxy is not initialized"}];
+        }
+        return NO;
+    }
+
+    infolog(*self->log, "Reapplying DNS proxy settings...");
+
+    DnsProxySettings settings = convertConfig(config, *self->log);
+
+    auto [ret, err_or_warn] = self->proxy.reapply_settings(std::move(settings), DnsProxy::ReapplyOptions(options));
+    if (!ret) {
+        auto str = AG_FMT("Failed to reapply DNS proxy settings: {}", err_or_warn->str());
+        errlog(*self->log, "{}", str);
+        if (error) {
+            *error = [NSError errorWithDomain:AGDnsProxyErrorDomain
+                                         code:(AGDnsProxyInitError)(err_or_warn->value())
+                                         userInfo:@{NSLocalizedDescriptionKey : convert_string(str)}];
+        }
+        return NO;
+    }
+    if (error && err_or_warn) {
+        auto str = AG_FMT("DNS proxy settings reapplied with warnings:\n{}", err_or_warn->str());
+        *error = [NSError errorWithDomain:AGDnsProxyErrorDomain
+                                     code:(AGDnsProxyInitError)(err_or_warn->value())
+                                     userInfo:@{NSLocalizedDescriptionKey : convert_string(str)}];
+    }
+
+    infolog(*self->log, "DNS proxy settings reapplied successfully");
+    return YES;
 }
 
 static coro::Task<CFDataRef> handleIPv4Packet(AGDnsProxy *self, NSData *packet)
@@ -1693,6 +1741,7 @@ withCompletionHandler:(void (^)(NSData *))handler {
             if (info) {
                 cpp_info.emplace();
                 cpp_info->transparent = info.transparent;
+                cpp_info->proto = info.isTcp ? ag::utils::TP_TCP : ag::utils::TP_UDP;
             }
             auto result = co_await self->proxy.handle_message({(uint8_t *) message.bytes, (size_t) message.length},
                     opt_as_ptr(cpp_info));
@@ -1703,9 +1752,20 @@ withCompletionHandler:(void (^)(NSData *))handler {
     });
 }
 
+- (BOOL)matchFallbackDomains:(NSData *)message {
+    if (!initialized) {
+        return NO;
+    }
+    return self->proxy.match_fallback_domains({(uint8_t *) message.bytes, (size_t) message.length});
+}
+
 + (BOOL) isValidRule: (NSString *) str
 {
     return DnsFilter::is_valid_rule([str UTF8String]);
+}
+
++ (void)crash {
+    *((int *) 0x42) = 0x42;
 }
 
 + (NSString *)libraryVersion {

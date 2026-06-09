@@ -39,6 +39,7 @@ public:
      * If the cache entry is expired, it becomes least recently used,
      * all response records' TTLs are set to 1 second,
      * and `expired` is set to `true`.
+     * @param block_ech Whether ECH blocking is enabled for this request (affects cache key)
      */
     Result get(const ldns_pkt *request) {
         Result r{};
@@ -102,6 +103,7 @@ public:
 
     /*
      * Check cacheability and put an eligible response to the cache
+     * @param block_ech Whether ECH blocking is enabled for this request (affects cache key)
      */
     void put(const ldns_pkt *request, ldns_pkt_ptr response, std::optional<int32_t> upstream_id) {
         if (m_cache.max_size() == 0) {
@@ -190,7 +192,8 @@ private:
         const auto *question = ldns_rr_list_rr(ldns_pkt_question(request), 0);
         std::string key = fmt::format("{}|{}|{}{}|", // '|' is to avoid collisions
                 (int) ldns_rr_get_type(question), (int) ldns_rr_get_class(question),
-                ldns_pkt_edns_do(request) ? "1" : "0", ldns_pkt_cd(request) ? "1" : "0");
+                ldns_pkt_edns_do(request) ? "1" : "0",
+                ldns_pkt_cd(request) ? "1" : "0"); // 'e' suffix for ECH-blocked cache entries
 
         // Compute the domain name, in lower case for case-insensitivity
         const auto *owner = ldns_rr_owner(question);

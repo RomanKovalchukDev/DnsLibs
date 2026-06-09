@@ -575,4 +575,342 @@ public class DnsProxyTest {
             fail();
         }
     }
+
+    @Test
+    public void testReapplySettingsFastUpdate() throws IOException {
+        // Test fast update: only upstreams are updated, filters remain unchanged
+        final DnsProxySettings settings = getDefaultSettings();
+        // Add a blocking filter for example.com
+        settings.getFilterParams().add(new FilterParams(1, "||example.com^", true));
+        
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            // Test that filter works before reapply - example.com should be blocked
+            final Message req1 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res1 = new Message(proxy.handleMessage(req1.toWire(), null));
+            assertEquals("example.com should be blocked initially", Rcode.REFUSED, res1.getRcode());
+            
+            // Change only upstreams, keep filters unchanged
+            final DnsProxySettings newSettings = getDefaultSettings();
+            UpstreamSettings newUpstream = new UpstreamSettings();
+            newUpstream.setAddress("8.8.8.8");
+            newSettings.getUpstreams().clear();
+            newSettings.getUpstreams().add(newUpstream);
+            
+            // Fast update (SETTINGS only)
+            DnsProxy.InitResult result =
+                    proxy.reapplySettings(newSettings, EnumSet.of(DnsProxy.ReapplyOption.SETTINGS));
+            assertTrue("Fast reapply should succeed", result.success);
+            assertEquals(DnsProxy.InitErrorCode.OK, result.code);
+            
+            // Test that filter still works after fast reapply (filters preserved)
+            final Message req2 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res2 = new Message(proxy.handleMessage(req2.toWire(), null));
+            assertEquals("example.com should still be blocked after fast update", Rcode.REFUSED, res2.getRcode());
+            
+            // Test that new upstream works - google.com should resolve
+            final Message req3 = Message.newQuery(Record.newRecord(Name.fromString("google.com."), Type.A, DClass.IN));
+            final Message res3 = new Message(proxy.handleMessage(req3.toWire(), null));
+            assertEquals("google.com should resolve with new upstream", Rcode.NOERROR, res3.getRcode());
+        }
+    }
+
+    @Test
+    public void testReapplySettingsFullUpdate() throws IOException {
+        // Test full update: both upstreams and filters are updated
+        final DnsProxySettings settings = getDefaultSettings();
+        // Add a blocking filter for example.com
+        settings.getFilterParams().add(new FilterParams(1, "||example.com^", true));
+        
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            // Test that original filter works - example.com should be blocked
+            final Message req1 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res1 = new Message(proxy.handleMessage(req1.toWire(), null));
+            assertEquals("example.com should be blocked initially", Rcode.REFUSED, res1.getRcode());
+            
+            // Test that test.com is not blocked initially
+            final Message req2 = Message.newQuery(Record.newRecord(Name.fromString("test.com."), Type.A, DClass.IN));
+            final Message res2 = new Message(proxy.handleMessage(req2.toWire(), null));
+            assertEquals("test.com should not be blocked initially", Rcode.NOERROR, res2.getRcode());
+            
+            // Change both upstreams and filters
+            final DnsProxySettings newSettings = getDefaultSettings();
+            // Replace filter: block test.com instead of example.com
+            newSettings.getFilterParams().add(new FilterParams(1, "||test.com^", true));
+            UpstreamSettings newUpstream = new UpstreamSettings();
+            newUpstream.setAddress("8.8.8.8");
+            newSettings.getUpstreams().clear();
+            newSettings.getUpstreams().add(newUpstream);
+            
+            // Full update (SETTINGS | FILTERS)
+            DnsProxy.InitResult result = proxy.reapplySettings(
+                    newSettings, EnumSet.of(DnsProxy.ReapplyOption.SETTINGS, DnsProxy.ReapplyOption.FILTERS));
+            assertTrue("Full reapply should succeed", result.success);
+            assertEquals(DnsProxy.InitErrorCode.OK, result.code);
+            
+            // Test that old filter no longer works - example.com should now pass
+            final Message req3 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res3 = new Message(proxy.handleMessage(req3.toWire(), null));
+            assertEquals("example.com should not be blocked after filter update", Rcode.NOERROR, res3.getRcode());
+            
+            // Test that new filter works - test.com should now be blocked
+            final Message req4 = Message.newQuery(Record.newRecord(Name.fromString("test.com."), Type.A, DClass.IN));
+            final Message res4 = new Message(proxy.handleMessage(req4.toWire(), null));
+            assertEquals("test.com should be blocked after filter update", Rcode.REFUSED, res4.getRcode());
+        }
+    }
+
+    @Test
+    public void testReapplySettingsOnClosedProxy() {
+        final DnsProxySettings settings = getDefaultSettings();
+        final DnsProxy proxy = new DnsProxy(context, settings);
+        proxy.close();
+        
+        // Test that reapplySettings throws IllegalStateException on closed proxy
+        try {
+            proxy.reapplySettings(settings, EnumSet.of(DnsProxy.ReapplyOption.SETTINGS));
+            fail("Expected IllegalStateException when calling reapplySettings on closed proxy");
+        } catch (IllegalStateException e) {
+            assertEquals("Closed", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testReapplySettingsFiltersOnly() throws IOException {
+        // Test filters-only update: only filters are updated, upstreams remain unchanged
+        final DnsProxySettings settings = getDefaultSettings();
+        // Add a blocking filter for example.com
+        settings.getFilterParams().add(new FilterParams(1, "||example.com^", true));
+        
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            // Test that original filter works - example.com should be blocked
+            final Message req1 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res1 = new Message(proxy.handleMessage(req1.toWire(), null));
+            assertEquals("example.com should be blocked initially", Rcode.REFUSED, res1.getRcode());
+            
+            // Test that test.com is not blocked initially
+            final Message req2 = Message.newQuery(Record.newRecord(Name.fromString("test.com."), Type.A, DClass.IN));
+            final Message res2 = new Message(proxy.handleMessage(req2.toWire(), null));
+            assertEquals("test.com should not be blocked initially", Rcode.NOERROR, res2.getRcode());
+            
+            // Change only filters, keep upstreams unchanged
+            final DnsProxySettings newSettings = getDefaultSettings();
+            // Replace filter: block test.com instead of example.com
+            newSettings.getFilterParams().add(new FilterParams(1, "||test.com^", true));
+            
+            // Filters-only update (FILTERS only)
+            DnsProxy.InitResult result = proxy.reapplySettings(
+                    newSettings, EnumSet.of(DnsProxy.ReapplyOption.FILTERS));
+            assertTrue("Filters-only reapply should succeed", result.success);
+            assertEquals(DnsProxy.InitErrorCode.OK, result.code);
+            
+            // Test that old filter no longer works - example.com should now pass
+            final Message req3 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res3 = new Message(proxy.handleMessage(req3.toWire(), null));
+            assertEquals("example.com should not be blocked after filter update", Rcode.NOERROR, res3.getRcode());
+            
+            // Test that new filter works - test.com should now be blocked
+            final Message req4 = Message.newQuery(Record.newRecord(Name.fromString("test.com."), Type.A, DClass.IN));
+            final Message res4 = new Message(proxy.handleMessage(req4.toWire(), null));
+            assertEquals("test.com should be blocked after filter update", Rcode.REFUSED, res4.getRcode());
+        }
+    }
+
+    @Test
+    public void testReapplySettingsNoOp() throws IOException {
+        // Test no-op update: both flags are false, nothing should change
+        final DnsProxySettings settings = getDefaultSettings();
+        // Add a blocking filter for example.com
+        settings.getFilterParams().add(new FilterParams(1, "||example.com^", true));
+        
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            // Test that filter works before reapply
+            final Message req1 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res1 = new Message(proxy.handleMessage(req1.toWire(), null));
+            assertEquals("example.com should be blocked initially", Rcode.REFUSED, res1.getRcode());
+            
+            // Call reapply_settings with empty EnumSet (no-op)
+            final DnsProxySettings newSettings = getDefaultSettings();
+            DnsProxy.InitResult result = proxy.reapplySettings(newSettings, EnumSet.noneOf(DnsProxy.ReapplyOption.class));
+            assertTrue("No-op reapply should succeed", result.success);
+            assertEquals(DnsProxy.InitErrorCode.OK, result.code);
+            
+            // Test that filter still works after no-op reapply (nothing changed)
+            final Message req2 = Message.newQuery(Record.newRecord(Name.fromString("example.com."), Type.A, DClass.IN));
+            final Message res2 = new Message(proxy.handleMessage(req2.toWire(), null));
+            assertEquals("example.com should still be blocked after no-op", Rcode.REFUSED, res2.getRcode());
+        }
+    }
+
+    @Test
+    public void testReapplySettingsFilterError() throws IOException {
+        // Test that reapply_settings handles filter initialization errors
+        final DnsProxySettings settings = getDefaultSettings();
+        
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            // Try to reapply with invalid filter (non-existent file)
+            final DnsProxySettings newSettings = getDefaultSettings();
+            newSettings.getFilterParams().add(new FilterParams(1, "/non/existent/filter/file.txt", false));
+            
+            try {
+                proxy.reapplySettings(newSettings, EnumSet.of(DnsProxy.ReapplyOption.SETTINGS, DnsProxy.ReapplyOption.FILTERS));
+                fail("Expected DnsProxyInitException when reapplying with invalid filter");
+            } catch (DnsProxyInitException e) {
+                // Expected exception
+                assertFalse("Filter error should result in failure", e.getResult().success);
+            }
+        }
+    }
+
+    @Test
+    public void testSystemUpstream() {
+        testSystemUpstreamWithAddress("system://");
+    }
+
+    @Test
+    public void testSystemUpstreamWithNetworkInterface() {
+        org.junit.Assume.assumeTrue(
+                "Skipping testSystemUpstreamWithNetworkInterface: USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM is OFF",
+                com.adguard.dnslibs.BuildConfig.USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM);
+
+        testSystemUpstreamWithAddress("system://eth0");
+    }
+
+    private void testSystemUpstreamWithAddress(String upstreamAddress) {
+        final DnsProxySettings settings = getDefaultSettings();
+        settings.getUpstreams().clear();
+
+        final UpstreamSettings systemUpstream = new UpstreamSettings();
+        systemUpstream.setAddress(upstreamAddress);
+        systemUpstream.setId(100);
+        settings.getUpstreams().add(systemUpstream);
+
+        settings.setUpstreamTimeoutMs(5000);
+
+        final List<DnsRequestProcessedEvent> eventList =
+                Collections.synchronizedList(new ArrayList<DnsRequestProcessedEvent>());
+
+        final DnsProxyEvents events = new DnsProxyEvents() {
+            @Override
+            public void onRequestProcessed(DnsRequestProcessedEvent event) {
+                log.info("System upstream ({}) DNS request processed: {}", upstreamAddress, event.toString());
+                eventList.add(event);
+            }
+        };
+        try (final DnsProxy proxy = new DnsProxy(context, settings, events)) {
+            assertEquals(settings, proxy.getSettings());
+
+            final Message req = Message.newQuery(Record.newRecord(Name.fromString("google.com."), Type.A, DClass.IN));
+            final Message res = new Message(proxy.handleMessage(req.toWire(), null));
+
+            assertEquals(Rcode.NOERROR, res.getRcode());
+        } catch (IOException e) {
+            fail("System upstream test failed for " + upstreamAddress + ": " + e.toString());
+        }
+    }
+
+    @Test
+    public void testSystemUpstreamEmptyAAAAResponseContainsSOA() {
+        final DnsProxySettings settings = getDefaultSettings();
+        settings.getUpstreams().clear();
+
+        final UpstreamSettings systemUpstream = new UpstreamSettings();
+        systemUpstream.setAddress("system://");
+        systemUpstream.setId(100);
+        settings.getUpstreams().add(systemUpstream);
+
+        settings.setUpstreamTimeoutMs(5000);
+
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            final Message req = Message.newQuery(Record.newRecord(Name.fromString("ipv4only.arpa."), Type.AAAA, DClass.IN));
+            final Message res = new Message(proxy.handleMessage(req.toWire(), null));
+
+            assertEquals(Rcode.NOERROR, res.getRcode());
+
+            if (res.getSectionArray(org.xbill.DNS.Section.ANSWER).length == 0) {
+                final Record[] authority = res.getSectionArray(org.xbill.DNS.Section.AUTHORITY);
+                assertTrue("Empty response must contain SOA in authority section (RFC 2308)", authority.length > 0);
+
+                boolean hasSOA = false;
+                for (Record rr : authority) {
+                    if (rr.getType() == Type.SOA) {
+                        hasSOA = true;
+                        break;
+                    }
+                }
+                assertTrue("Authority section must contain SOA record for empty response (RFC 2308)", hasSOA);
+            }
+        } catch (IOException e) {
+            fail("System upstream empty AAAA test failed: " + e.toString());
+        }
+    }
+
+    @Test
+    public void testSystemUpstreamNXDOMAINResponseContainsSOA() {
+        final DnsProxySettings settings = getDefaultSettings();
+        settings.getUpstreams().clear();
+
+        final UpstreamSettings systemUpstream = new UpstreamSettings();
+        systemUpstream.setAddress("system://");
+        systemUpstream.setId(100);
+        settings.getUpstreams().add(systemUpstream);
+
+        settings.setUpstreamTimeoutMs(5000);
+
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            final Message req = Message.newQuery(Record.newRecord(Name.fromString("this-domain-does-not-exist-12345.invalid."), Type.A, DClass.IN));
+            final Message res = new Message(proxy.handleMessage(req.toWire(), null));
+
+            if (res.getRcode() == Rcode.NXDOMAIN) {
+                final Record[] authority = res.getSectionArray(org.xbill.DNS.Section.AUTHORITY);
+                assertTrue("NXDOMAIN response must contain SOA in authority section (RFC 2308)", authority.length > 0);
+
+                boolean hasSOA = false;
+                for (Record rr : authority) {
+                    if (rr.getType() == Type.SOA) {
+                        hasSOA = true;
+                        break;
+                    }
+                }
+                assertTrue("Authority section must contain SOA record for NXDOMAIN response (RFC 2308)", hasSOA);
+            }
+        } catch (IOException e) {
+            fail("System upstream NXDOMAIN test failed: " + e.toString());
+        }
+    }
+
+    @Test
+    public void testSystemUpstreamCNAMEResolution() {
+        final DnsProxySettings settings = getDefaultSettings();
+        settings.getUpstreams().clear();
+
+        final UpstreamSettings systemUpstream = new UpstreamSettings();
+        systemUpstream.setAddress("system://");
+        systemUpstream.setId(100);
+        settings.getUpstreams().add(systemUpstream);
+
+        settings.setUpstreamTimeoutMs(5000);
+
+        try (final DnsProxy proxy = new DnsProxy(context, settings)) {
+            final Message req = Message.newQuery(Record.newRecord(Name.fromString("www.reddit.com."), Type.A, DClass.IN));
+            final Message res = new Message(proxy.handleMessage(req.toWire(), null));
+
+            assertEquals("Response should be NOERROR", Rcode.NOERROR, res.getRcode());
+
+            final Record[] answer = res.getSectionArray(org.xbill.DNS.Section.ANSWER);
+            assertTrue("Response should not be empty", answer.length > 0);
+
+            boolean hasA = false;
+            for (Record rr : answer) {
+                if (rr.getType() == Type.A) {
+                    hasA = true;
+                    break;
+                }
+            }
+
+            assertTrue("Response should contain A record", hasA);
+        } catch (IOException e) {
+            fail("System upstream CNAME test failed: " + e.toString());
+        }
+    }
+
 }

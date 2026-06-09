@@ -45,7 +45,7 @@ SocketFactory::SocketPtr SocketFactory::make_socket(SocketParameters p) const {
                             return ProxiedSocket::OCFA_CLOSE_CONNECTION;
                         },
                         [](void *arg) -> ProxiedSocket::Fallback {
-                            return {((SocketFactory *)arg)->m_direct_proxy.get()};
+                            return {((SocketFactory *) arg)->m_direct_proxy.get()};
                         },
                         (void *) this,
                 },
@@ -85,6 +85,11 @@ SocketFactory::SocketPtr SocketFactory::make_secured_socket(
 
 Error<SocketError> SocketFactory::prepare_fd(
         evutil_socket_t fd, const SocketAddress &peer, const IfIdVariant &outbound_interface) const {
+    if (m_parameters.protect_fd) {
+        if (auto e = m_parameters.protect_fd(fd, peer)) {
+            return e;
+        }
+    }
     if (peer.is_loopback()) {
         return {};
     }

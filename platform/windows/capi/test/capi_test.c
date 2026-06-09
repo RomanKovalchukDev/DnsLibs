@@ -11,26 +11,31 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ASSERT(cond) do {                                 \
-    if (!(cond)) {                                        \
-        fprintf(stderr,                                   \
-                "\n\t%s:%d:%s() assertion (%s) failed\n", \
-                __FILE__, __LINE__, __func__, #cond);     \
-        exit(1);                                          \
-    }                                                     \
-} while (0)
+#define ASSERT(cond)                                                                                                   \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            fprintf(stderr, "\n\t%s:%d:%s() assertion (%s) failed\n", __FILE__, __LINE__, __func__, #cond);            \
+            exit(1);                                                                                                   \
+        }                                                                                                              \
+    } while (0)
 
 static bool on_req_called = false;
+static bool expect_blocked_request = false;
 static void on_req(const ag_dns_request_processed_event *event) {
     on_req_called = true;
-    ASSERT(event->elapsed > 0);
     ASSERT(0 == strcmp(event->domain, "example.org."));
     ASSERT(event->answer);
     ASSERT(event->error == NULL);
     ASSERT(event->type);
     ASSERT(event->status);
-    ASSERT(event->upstream_id);
-    ASSERT(*event->upstream_id == 42);
+    if (!expect_blocked_request) {
+        ASSERT(event->elapsed > 0);
+        ASSERT(event->upstream_id);
+        ASSERT(*event->upstream_id == 42);
+    } else {
+        ASSERT(event->elapsed >= 0);
+        ASSERT(event->upstream_id == NULL);
+    }
 }
 
 static bool on_cert_called = false;
@@ -46,16 +51,20 @@ static ag_certificate_verification_result on_cert(const ag_certificate_verificat
 }
 
 static void on_log(void *arg, ag_log_level level, const char *message, uint32_t length) {
-    ASSERT((uintptr_t) arg == 42);
-    fprintf(stderr, "on_log: (%d) %.*s\n", (int) level, (int) length, message);
+    ASSERT((uintptr_t)arg == 42);
+    fprintf(stderr, "on_log: (%d) %.*s\n", (int)level, (int)length, message);
 }
 
 static void test_proxy() {
+    // Reset global flags at the beginning of the test
+    on_req_called = false;
+    on_cert_called = false;
+
     const char *version = ag_get_capi_version();
     ASSERT(version);
     ASSERT(strlen(version));
 
-    ag_set_log_callback(on_log, (void *) (uintptr_t) 42);
+    ag_set_log_callback(on_log, (void *)(uintptr_t)42);
 
     ag_dnsproxy_settings *settings = ag_dnsproxy_settings_get_default();
 
@@ -92,8 +101,8 @@ static void test_proxy() {
     memset(&settings->upstreams, 0, sizeof(settings->upstreams));
     ag_dnsproxy_settings_free(settings);
 
-    ldns_pkt *query = ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"),
-                                         LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
+    ldns_pkt *query =
+            ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
     ag_buffer msg = {0};
     size_t out_size;
     ASSERT(LDNS_STATUS_OK == ldns_pkt2wire(&msg.data, query, &out_size));
@@ -116,7 +125,178 @@ static void test_proxy() {
     LDNS_FREE(msg.data);
 }
 
-#define TEST_DNS_STAMP "sdns://AgcAAAAAAAAACTEyNy4wLjAuMSDDhGvyS56TymQnTA7GfB7MXgJP_KzS10AZNQ6B_lRq5AtleGFtcGxlLmNvbQovZG5zLXF1ZXJ5"
+static void test_reapply_settings() {
+    // Reset global flags at the beginning of the test
+    on_req_called = false;
+    on_cert_called = false;
+
+    const char *version = ag_get_capi_version();
+    ASSERT(version);
+    ASSERT(strlen(version));
+
+    ag_set_log_callback(on_log, (void *)(uintptr_t)42);
+
+    ag_dnsproxy_settings *settings = ag_dnsproxy_settings_get_default();
+
+    ASSERT(settings->fallback_domains.size > 0);
+    ASSERT(settings->fallback_domains.data);
+
+    ASSERT(settings->upstreams.data == NULL);
+    ASSERT(settings->upstreams.size == 0);
+
+    ag_upstream_options upstream1 = {
+            .address = "8.8.8.8",
+            .id = 42,
+    };
+
+    ag_upstream_options upstream2 = {
+            .address = "1.1.1.1",
+            .id = 42,
+    };
+
+    settings->upstreams.data = &upstream1;
+    settings->upstreams.size = 1;
+
+    // Add blocking filter
+    ag_filter_params filter = {.id = 1, .data = "example.org", .in_memory = true};
+    settings->filter_params.filters.data = &filter;
+    settings->filter_params.filters.size = 1;
+
+    ag_dnsproxy_events events = {0};
+    events.on_request_processed = on_req;
+    events.on_certificate_verification = on_cert;
+
+    ag_dnsproxy_init_result result;
+    const char *message = NULL;
+    ag_dnsproxy *proxy = ag_dnsproxy_init(settings, &events, &result, &message);
+    ASSERT(proxy);
+    ASSERT(result == AGDPIR_OK);
+    ASSERT(message == NULL);
+
+    // Initially, filter is active, so requests will be blocked
+    expect_blocked_request = true;
+
+    ag_dnsproxy_settings *actual_settings1 = ag_dnsproxy_get_settings(proxy);
+    ASSERT(actual_settings1);
+    ASSERT(actual_settings1->upstreams.data[0].id == settings->upstreams.data[0].id);
+    ag_dnsproxy_settings_free(actual_settings1);
+
+    // reapply settings fast
+    settings->upstreams.data = &upstream2;
+    settings->upstreams.size = 1;
+    memset(&settings->filter_params, 0, sizeof(settings->filter_params)); // filter disable - no work
+
+    bool reapply_result = ag_dnsproxy_reapply_settings(proxy, settings, AGDPRO_SETTINGS, &result, &message);
+    ASSERT(reapply_result);
+    ASSERT(result == AGDPIR_OK);
+    ASSERT(message == NULL);
+
+    ag_dnsproxy_settings *actual_settings2 = ag_dnsproxy_get_settings(proxy);
+    ASSERT(actual_settings2);
+    ASSERT(actual_settings2->upstreams.data[0].id == settings->upstreams.data[0].id);
+    ag_dnsproxy_settings_free(actual_settings2);
+
+    // send query
+    on_req_called = false;
+    ldns_pkt *query =
+            ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
+    ag_buffer msg = {0};
+    size_t out_size;
+    ASSERT(LDNS_STATUS_OK == ldns_pkt2wire(&msg.data, query, &out_size));
+    msg.size = out_size;
+
+    ag_buffer res = ag_dnsproxy_handle_message(proxy, msg, NULL);
+    ASSERT(on_req_called);
+
+    ldns_pkt *response = NULL;
+    ASSERT(LDNS_STATUS_OK == ldns_wire2pkt(&response, res.data, res.size));
+    ldns_pkt_rcode rcode = ldns_pkt_get_rcode(response);
+    ASSERT(LDNS_RCODE_NOERROR == rcode); // blocked with 0.0.0.0 answer
+    uint16_t ancount = ldns_pkt_ancount(response);
+    // For blocked requests with 0.0.0.0 answer, ancount should be > 0
+    ASSERT(ancount > 0);
+
+    // reapply settings full (disable filters)
+    reapply_result = ag_dnsproxy_reapply_settings(proxy, settings, AGDPRO_SETTINGS | AGDPRO_FILTERS, &result, &message);
+    ASSERT(reapply_result);
+    ASSERT(result == AGDPIR_OK);
+    ASSERT(message == NULL);
+
+    ag_dnsproxy_settings *actual_settings3 = ag_dnsproxy_get_settings(proxy);
+    ASSERT(actual_settings3);
+    ASSERT(actual_settings3->upstreams.data[0].id == settings->upstreams.data[0].id);
+    ag_dnsproxy_settings_free(actual_settings3);
+
+    // send second query after full reapply (should work now - no blocking)
+    ldns_pkt_free(response);
+    ag_buffer_free(res);
+
+    // Reset flags for unblocked request
+    expect_blocked_request = false;
+    on_req_called = false;
+
+    res = ag_dnsproxy_handle_message(proxy, msg, NULL);
+    ASSERT(on_req_called);
+
+    ASSERT(LDNS_STATUS_OK == ldns_wire2pkt(&response, res.data, res.size));
+    ASSERT(LDNS_RCODE_NOERROR == ldns_pkt_get_rcode(response)); // no error now
+    ASSERT(ldns_pkt_ancount(response) > 0);
+
+    ldns_pkt_free(response);
+    ag_buffer_free(res);
+
+    // Test filters-only reapply (reapply_upstreams=false, reapply_filters=true)
+    // Re-enable blocking filter
+    ag_filter_params filter2 = {.id = 1, .data = "example.org", .in_memory = true};
+    settings->filter_params.filters.data = &filter2;
+    settings->filter_params.filters.size = 1;
+
+    reapply_result = ag_dnsproxy_reapply_settings(proxy, settings, AGDPRO_FILTERS, &result, &message);
+    ASSERT(reapply_result);
+    ASSERT(result == AGDPIR_OK);
+    ASSERT(message == NULL);
+
+    // Verify filter is now active again (request should be blocked)
+    expect_blocked_request = true;
+    on_req_called = false;
+    res = ag_dnsproxy_handle_message(proxy, msg, NULL);
+    ASSERT(on_req_called);
+    ASSERT(LDNS_STATUS_OK == ldns_wire2pkt(&response, res.data, res.size));
+    ASSERT(LDNS_RCODE_NOERROR == ldns_pkt_get_rcode(response));
+    ASSERT(ldns_pkt_ancount(response) > 0); // blocked with 0.0.0.0 answer
+
+    ldns_pkt_free(response);
+    ag_buffer_free(res);
+
+    // Test no-op reapply (AGDP_RO_NONE)
+    reapply_result = ag_dnsproxy_reapply_settings(proxy, settings, AGDPRO_NONE, &result, &message);
+    ASSERT(reapply_result);
+    ASSERT(result == AGDPIR_OK);
+    ASSERT(message == NULL);
+
+    // Verify nothing changed - filter should still be active (request should be blocked)
+    on_req_called = false;
+    res = ag_dnsproxy_handle_message(proxy, msg, NULL);
+    ASSERT(on_req_called);
+    ASSERT(LDNS_STATUS_OK == ldns_wire2pkt(&response, res.data, res.size));
+    ASSERT(LDNS_RCODE_NOERROR == ldns_pkt_get_rcode(response));
+    ASSERT(ldns_pkt_ancount(response) > 0); // still blocked with 0.0.0.0 answer
+
+    // Clear pointers before freeing to avoid double-free
+    memset(&settings->upstreams, 0, sizeof(settings->upstreams));
+    memset(&settings->filter_params, 0, sizeof(settings->filter_params));
+    ag_dnsproxy_settings_free(settings);
+
+    ag_dnsproxy_deinit(proxy);
+
+    ldns_pkt_free(query);
+    ldns_pkt_free(response);
+    ag_buffer_free(res);
+    LDNS_FREE(msg.data);
+}
+
+#define TEST_DNS_STAMP                                                                                                 \
+    "sdns://AgcAAAAAAAAACTEyNy4wLjAuMSDDhGvyS56TymQnTA7GfB7MXgJP_KzS10AZNQ6B_lRq5AtleGFtcGxlLmNvbQovZG5zLXF1ZXJ5"
 
 static void test_dnsstamp() {
     const char *error = NULL;
@@ -150,7 +330,8 @@ static void test_dnsstamp() {
 
     ASSERT(0 == strcmp(ag_dns_stamp_pretty_url(stamp), "quic://dns.adguard.com"));
     ASSERT(0 == strcmp(ag_dns_stamp_prettier_url(stamp), "quic://dns.adguard.com"));
-    ASSERT(0 == strcmp(ag_dns_stamp_to_str(stamp), "sdns://BAQAAAAAAAAADDk0LjE0MC4xNC4xNATK_rq-D2Rucy5hZGd1YXJkLmNvbQ"));
+    ASSERT(0 ==
+           strcmp(ag_dns_stamp_to_str(stamp), "sdns://BAQAAAAAAAAADDk0LjE0MC4xNC4xNATK_rq-D2Rucy5hZGd1YXJkLmNvbQ"));
 
     stamp->proto = AGSPT_DNSCRYPT;
     stamp->hashes.size = 0;
@@ -158,9 +339,11 @@ static void test_dnsstamp() {
     stamp->server_public_key.data = BYTES;
     stamp->server_public_key.size = 8;
 
-    ASSERT(0 == strcmp(ag_dns_stamp_pretty_url(stamp), "sdns://AQQAAAAAAAAADDk0LjE0MC4xNC4xNAjK_rq-3q2-7xcyLmRuc2NyeXB0LWNlcnQuYWRndWFyZA"));
+    ASSERT(0 == strcmp(ag_dns_stamp_pretty_url(stamp),
+                       "sdns://AQQAAAAAAAAADDk0LjE0MC4xNC4xNAjK_rq-3q2-7xcyLmRuc2NyeXB0LWNlcnQuYWRndWFyZA"));
     ASSERT(0 == strcmp(ag_dns_stamp_prettier_url(stamp), "dnscrypt://2.dnscrypt-cert.adguard"));
-    ASSERT(0 == strcmp(ag_dns_stamp_to_str(stamp), "sdns://AQQAAAAAAAAADDk0LjE0MC4xNC4xNAjK_rq-3q2-7xcyLmRuc2NyeXB0LWNlcnQuYWRndWFyZA"));
+    ASSERT(0 == strcmp(ag_dns_stamp_to_str(stamp),
+                       "sdns://AQQAAAAAAAAADDk0LjE0MC4xNC4xNAjK_rq-3q2-7xcyLmRuc2NyeXB0LWNlcnQuYWRndWFyZA"));
 }
 
 static void test_cert_fingerprint() {
@@ -168,7 +351,7 @@ static void test_cert_fingerprint() {
     ASSERT(version);
     ASSERT(strlen(version));
 
-    ag_set_log_callback(on_log, (void *) (uintptr_t) 42);
+    ag_set_log_callback(on_log, (void *)(uintptr_t)42);
 
     ag_dnsproxy_settings *settings = ag_dnsproxy_settings_get_default();
 
@@ -211,8 +394,8 @@ static void test_cert_fingerprint() {
     memset(&settings->upstreams, 0, sizeof(settings->upstreams));
     ag_dnsproxy_settings_free(settings);
 
-    ldns_pkt *query = ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"),
-                                         LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
+    ldns_pkt *query =
+            ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
     ag_buffer msg = {0};
     size_t out_size;
     ldns_pkt2wire(&msg.data, query, &out_size);
@@ -306,8 +489,8 @@ static void test_async_transparent() {
     const char *message = NULL;
     ag_dnsproxy *proxy = ag_dnsproxy_init(settings, NULL, &result, &message);
     ASSERT(proxy);
-    ldns_pkt *query = ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"),
-            LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
+    ldns_pkt *query =
+            ldns_pkt_query_new(ldns_dname_new_frm_str("example.org"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
     ag_buffer msg = {0};
     size_t out_size;
     ASSERT(LDNS_STATUS_OK == ldns_pkt2wire(&msg.data, query, &out_size));
@@ -331,6 +514,7 @@ int main() {
     ag_set_log_level(AGLL_TRACE);
 
     test_proxy();
+    test_reapply_settings();
     test_utils();
     // Disabled since AG servers does not have stable SubjectPublicKeyInfo
     // test_cert_fingerprint();

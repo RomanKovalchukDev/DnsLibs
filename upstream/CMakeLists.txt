@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 
 set(DNSLIBS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+option(USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM "Enable interface name resolution in SystemUpstream on Android (requires JNI)" OFF)
+
 add_library(upstream EXCLUDE_FROM_ALL
         upstream.cpp
         upstream_doh.h upstream_doh.cpp
@@ -18,11 +20,29 @@ add_library(upstream EXCLUDE_FROM_ALL
         resolver.h resolver.cpp
         upstream_utils.cpp
 )
-if (APPLE)
+# Platform-specific system resolver implementations
+if (APPLE OR ANDROID)
     target_sources(upstream PRIVATE
             upstream_system.h upstream_system.cpp
-            system_resolver.h system_resolver.cpp
+            system_resolver.h
     )
+    if (APPLE)
+        target_sources(upstream PRIVATE system_resolver_apple.cpp)
+    elseif (ANDROID)
+        target_sources(upstream PRIVATE 
+            system_resolver_android.cpp
+            android_res_api.h android_res_api.cpp
+        )
+        if (USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM)
+            target_sources(upstream PRIVATE
+                ${DNSLIBS_DIR}/platform/android/dnsproxy/lib/src/main/cpp/android_context_manager.cpp
+            )
+            target_include_directories(upstream PRIVATE
+                ${DNSLIBS_DIR}/platform/android/dnsproxy/lib/src/main/cpp
+            )
+            target_compile_definitions(upstream PRIVATE USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM)
+        endif()
+    endif()
 endif ()
 
 set_target_properties(upstream PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -74,12 +94,21 @@ target_link_libraries(upstream dnslibs_common dnsstamp dnscrypt dnslibs_net)
 target_link_libraries(upstream magic_enum::magic_enum libevent::libevent ldns::ldns)
 target_link_libraries(upstream ngtcp2::ngtcp2 ada::ada)
 
+# Android-specific libraries
+if (ANDROID)
+    target_link_libraries(upstream log)
+endif ()
+
 enable_testing()
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/add_unit_test.cmake)
 link_libraries(upstream)
 set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 
-add_unit_test(test_upstream "${TEST_DIR}" "${DNSLIBS_DIR}/dnscrypt/src" TRUE FALSE)
+if (ANDROID)
+    add_unit_test(test_upstream "${TEST_DIR}" "${DNSLIBS_DIR}/dnscrypt/src;${DNSLIBS_DIR}/platform/android/dnsproxy/lib/src/main/cpp" TRUE FALSE)
+else()
+    add_unit_test(test_upstream "${TEST_DIR}" "${DNSLIBS_DIR}/dnscrypt/src" TRUE FALSE)
+endif()
 add_unit_test(test_upstream_utils "${TEST_DIR}" "" TRUE TRUE)
 if (APPLE)
     add_unit_test(test_system_resolver "${TEST_DIR}" "" TRUE TRUE)

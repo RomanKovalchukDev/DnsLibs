@@ -1,12 +1,12 @@
 #pragma once
 
+#include <magic_enum/magic_enum.hpp>
 #include <string>
 #include <vector>
-#include <magic_enum/magic_enum.hpp>
 
 #ifdef __APPLE__
-#include <sys/qos.h>
 #include <TargetConditionals.h>
+#include <sys/qos.h>
 #endif // __APPLE__
 
 #include "common/logger.h"
@@ -21,9 +21,9 @@ namespace ag::dns {
 
 struct Dns64Settings {
     std::vector<UpstreamOptions> upstreams; // The upstreams to use for discovery of DNS64 prefixes
-    uint32_t max_tries; // How many times, at most, to try DNS64 prefixes discovery before giving up
-    Millis wait_time; // How long to wait before a dns64 prefixes discovery attempt
-    Millis timeout; // Single discovery try timeout
+    uint32_t max_tries;                     // How many times, at most, to try DNS64 prefixes discovery before giving up
+    Millis wait_time;                       // How long to wait before a dns64 prefixes discovery attempt
+    Millis timeout;                         // Single discovery try timeout
     // Hardcoded DNS64 prefixes. If non-empty, prefix discovery is skipped and these are used directly.
     // Each prefix is a byte vector of length 4..12 (e.g., 12 bytes for a /96 prefix like 64:ff9b::).
     std::vector<Uint8Vector> prefixes;
@@ -67,11 +67,11 @@ struct ProxySettingsOverrides {
 };
 
 struct ListenerSettings {
-    std::string address; // The address to listen on
-    uint16_t port = 0; // The port to listen on
+    std::string address;                               // The address to listen on
+    uint16_t port = 0;                                 // The port to listen on
     utils::TransportProtocol protocol = utils::TP_UDP; // The protocol to listen for
     bool persistent = false; // If true, don't close the TCP connection after sending the first response
-    Millis idle_timeout{}; // Close the TCP connection this long after the last request received
+    Millis idle_timeout{};   // Close the TCP connection this long after the last request received
     ProxySettingsOverrides settings_overrides; // Overridden settings
 
     /// If not -1, listen on this file descriptor, which must already be bound.
@@ -80,8 +80,7 @@ struct ListenerSettings {
     evutil_socket_t fd = -1;
 
     std::string str() const {
-        return fmt::format(
-                "(protocol: {}, address: {}, port: {}, persistent: {}, idle_timeout: {} ms)",
+        return fmt::format("(protocol: {}, address: {}, port: {}, persistent: {}, idle_timeout: {} ms)",
                 magic_enum::enum_name(protocol), address, port, persistent, idle_timeout.count());
     }
 };
@@ -126,7 +125,7 @@ struct DnsProxySettings {
     bool ipv6_available; // If false, bootstrappers will fetch only A records
 
     DnsProxyBlockingMode adblock_rules_blocking_mode; // How to respond to requests blocked by AdBlock-style rules
-    DnsProxyBlockingMode hosts_rules_blocking_mode; // How to respond to requests blocked by hosts-style rules
+    DnsProxyBlockingMode hosts_rules_blocking_mode;   // How to respond to requests blocked by hosts-style rules
 
     std::string custom_blocking_ipv4; // Custom IPv4 address to return for filtered requests
     std::string custom_blocking_ipv6; // Custom IPv6 address to return for filtered requests
@@ -158,6 +157,9 @@ struct DnsProxySettings {
     /** Block Encrypted Client Hello by removing the "ech" parameter from SVCB/HTTPS records. */
     bool block_ech;
 
+    /** Block HTTP/3 by removing "h3" from the "alpn" parameter in SVCB/HTTPS records. */
+    bool block_h3_alpn;
+
     /**
      * Enable route resolver on Apple platforms.
      * This is needed when DnsProxy is used inside network extension and needs to use routes of some VPN.
@@ -185,6 +187,9 @@ struct DnsProxySettings {
     /** Enable HTTP/3 for DNS-over-HTTPS upstreams if it's able to connect quicker. */
     bool enable_http3;
 
+    /** Enable post-quantum cryptography. */
+    bool enable_post_quantum_cryptography;
+
     /**
      * EDNS device ID to include in requests.
      */
@@ -201,4 +206,4 @@ struct DnsProxySettings {
 #endif // __APPLE__ && TARGET_OS_IPHONE
 };
 
-}  // namespace ag::dns
+} // namespace ag::dns

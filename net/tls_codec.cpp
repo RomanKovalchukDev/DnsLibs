@@ -32,7 +32,7 @@ TlsCodec::TlsCodec(const CertificateVerifier *cert_verifier, TlsSessionCache *se
         , m_fingerprints(std::move(fingerprint)) {
 }
 
-Error<TlsCodec::TlsError> TlsCodec::connect(const std::string &sni, std::vector<std::string> alpn) {
+Error<TlsCodec::TlsError> TlsCodec::connect(const std::string &sni, std::vector<std::string> alpn, bool enable_pq) {
     ag::UniquePtr<SSL_CTX, &SSL_CTX_free> ctx{SSL_CTX_new(TLS_client_method())};
     SSL_CTX_set_verify(ctx.get(), SSL_VERIFY_PEER, nullptr);
     SSL_CTX_set_cert_verify_callback(ctx.get(), ssl_verify_callback, this);
@@ -47,6 +47,22 @@ Error<TlsCodec::TlsError> TlsCodec::connect(const std::string &sni, std::vector<
     if (!m_server_name.empty() && !SocketAddress(m_server_name, 0).valid()) {
         SSL_set_tlsext_host_name(m_ssl.get(), sni.c_str());
     }
+
+#ifdef OPENSSL_IS_BORINGSSL
+    if (enable_pq) {
+        static constexpr uint16_t PQ_GROUPS[] = {
+                SSL_GROUP_X25519_MLKEM768,
+                SSL_GROUP_X25519,
+                SSL_GROUP_SECP256R1,
+                SSL_GROUP_SECP384R1,
+        };
+        if (!SSL_set1_group_ids(m_ssl.get(), PQ_GROUPS, std::size(PQ_GROUPS))) {
+            warnlog(m_log, "Failed to set post-quantum groups, continuing with defaults");
+        } else {
+            tracelog(m_log, "Post-quantum cryptography enabled (ML-KEM-768)");
+        }
+    }
+#endif // OPENSSL_IS_BORINGSSL
 
     if (!alpn.empty()) {
         Uint8Vector serialized = make_alpn(alpn);
@@ -180,12 +196,13 @@ int TlsCodec::ssl_verify_callback(X509_STORE_CTX *ctx, void *arg) {
     auto *self = (TlsCodec *) arg;
 
     if (self->m_cert_verifier == nullptr) {
-        dbglog(self->m_log, "Cannot verify certificate due to verifier is not set");
+        warnlog(self->m_log, "Cannot verify certificate for '{}' due to verifier is not set", self->m_server_name);
         return 0;
     }
 
     if (auto err = self->m_cert_verifier->verify(ctx, self->m_server_name, self->m_fingerprints)) {
-        dbglog(self->m_log, "Failed to verify certificate: {}", *err);
+        warnlog(self->m_log, "Failed to verify certificate for '{}': {}", self->m_server_name, *err);
+        warnlog(self->m_log, "  {}", get_cert_diagnostic_info(ctx));
         return 0;
     }
 

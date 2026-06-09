@@ -1,17 +1,31 @@
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
 
-version = [name: '2.6.17', code: 619]
+version = [name: '2.8.53', code: 688]
 
 android {
     namespace 'com.adguard.dnslibs'
     ndkVersion '28.1.13356709'
     compileSdk 34
 
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         minSdk 24
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
+
+        // Expose USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM to Java code
+        buildConfigField "boolean", "USE_INTERFACE_NAMES_IN_SYSTEM_UPSTREAM", "false"
 
         externalNativeBuild {
             cmake {
@@ -60,4 +74,17 @@ dependencies {
     androidTestImplementation libs.espresso.core
     androidTestImplementation libs.dnsjava
     androidTestImplementation libs.rules
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.adguard.corelibs'
+                artifactId = 'dns-libs'
+                version = project.version.name
+            }
+        }
+    }
 }

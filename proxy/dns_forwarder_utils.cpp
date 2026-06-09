@@ -1,7 +1,8 @@
+#include "dns_forwarder_utils.h"
 #include "common/defs.h"
 #include "common/utils.h"
-#include "dns_forwarder_utils.h"
-#include <ldns/ldns.h>
+
+
 namespace ag::dns {
 
 std::string DnsForwarderUtils::rr_list_to_string(const ldns_rr_list *rr_list) {
@@ -19,9 +20,9 @@ std::string DnsForwarderUtils::rr_list_to_string(const ldns_rr_list *rr_list) {
         auto record_parts = ag::utils::split_by(record, '\t');
         auto it = record_parts.begin();
         if (record_parts.size() >= 4) {
-            it++; // Skip owner
-            it++; // Skip ttl
-            it++; // Skip class
+            it++;         // Skip owner
+            it++;         // Skip ttl
+            it++;         // Skip class
             out += *it++; // Add type
             out += ',';
             // Add serialized RDFs

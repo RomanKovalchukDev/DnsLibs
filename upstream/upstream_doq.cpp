@@ -1,6 +1,7 @@
 #include <cassert>
 #include <magic_enum/magic_enum.hpp>
 #include <openssl/rand.h>
+#include <openssl/x509.h>
 
 #ifdef __linux__
 #include <time.h>
@@ -13,11 +14,11 @@
 
 #include "common/clock.h"
 #if defined _WIN32 && !defined __clang__
-#pragma optimize( "", off )
+#pragma optimize("", off)
 #endif
 #include "common/parallel.h"
 #if defined _WIN32 && !defined __clang__
-#pragma optimize( "", on )
+#pragma optimize("", on)
 #endif
 #include "common/time_utils.h"
 #include "dns/upstream/upstream.h"
@@ -77,8 +78,8 @@ std::unique_ptr<DoqUpstream::SocketContext> DoqUpstream::ConnectionState::extrac
     return out;
 }
 
-DoqUpstream::DoqUpstream(const UpstreamOptions &opts, const UpstreamFactoryConfig &config,
-        std::vector<CertFingerprint> fingerprints)
+DoqUpstream::DoqUpstream(
+        const UpstreamOptions &opts, const UpstreamFactoryConfig &config, std::vector<CertFingerprint> fingerprints)
         : Upstream(opts, config)
         , m_max_pktlen{MAX_PKTLEN_IPV6}
         , m_quic_version{NGTCP2_PROTO_VER_V1}
@@ -107,7 +108,6 @@ static ngtcp2_encryption_level from_ssl_encryption_level(enum ssl_encryption_lev
 #endif
 }
 
-
 #if BORINGSSL_API_VERSION < 10
 int DoqUpstream::set_encryption_secrets(SSL *ssl, enum ssl_encryption_level_t ossl_level, const uint8_t *read_secret,
         const uint8_t *write_secret, size_t secret_len) {
@@ -121,7 +121,8 @@ int DoqUpstream::set_encryption_secrets(SSL *ssl, enum ssl_encryption_level_t os
 int DoqUpstream::set_rx_secret(SSL *ssl, enum ssl_encryption_level_t ossl_level, const SSL_CIPHER *cipher,
         const uint8_t *read_secret, size_t secret_len) {
     auto doq = static_cast<DoqUpstream *>(SSL_get_app_data(ssl));
-    if (0 != doq->on_key(
+    if (0
+            != doq->on_key(
                     ngtcp2_crypto_boringssl_from_ssl_encryption_level(ossl_level), read_secret, nullptr, secret_len)) {
         return 0;
     }
@@ -220,17 +221,23 @@ int DoqUpstream::send_alert(SSL *ssl, enum ssl_encryption_level_t /*level*/, uin
     return 0;
 }
 
-static auto quic_method = SSL_QUIC_METHOD {
+static auto quic_method = SSL_QUIC_METHOD{
 #if BORINGSSL_API_VERSION < 10
-    DoqUpstream::set_encryption_secrets,
+        DoqUpstream::set_encryption_secrets,
 #else
-    DoqUpstream::set_rx_secret, DoqUpstream::set_tx_secret,
+        DoqUpstream::set_rx_secret,
+        DoqUpstream::set_tx_secret,
 #endif
-            DoqUpstream::add_handshake_data, DoqUpstream::flush_flight, DoqUpstream::send_alert,
+        DoqUpstream::add_handshake_data,
+        DoqUpstream::flush_flight,
+        DoqUpstream::send_alert,
 };
 
 void DoqUpstream::retransmit_cb(uv_timer_t *timer) {
     auto doq = static_cast<DoqUpstream *>(Uv<uv_timer_t>::parent_from_data(timer->data));
+    if (doq == nullptr) {
+        return;
+    }
     tracelog(doq->m_log, "{}(): ...", __func__);
     if (doq->m_state == STOP) {
         return;
@@ -252,11 +259,17 @@ void DoqUpstream::retransmit_cb(uv_timer_t *timer) {
 
 void DoqUpstream::short_timeout_timer_cb(uv_timer_t *timer) {
     auto doq = static_cast<DoqUpstream *>(Uv<uv_timer_t>::parent_from_data(timer->data));
+    if (doq == nullptr) {
+        return;
+    }
     doq->disconnect("Short timeout timer expired");
 }
 
 void DoqUpstream::handshake_timer_cb(uv_timer_t *timer) {
     auto doq = static_cast<DoqUpstream *>(Uv<uv_timer_t>::parent_from_data(timer->data));
+    if (doq == nullptr) {
+        return;
+    }
     // also stop idle timer
     uv_timer_stop(doq->m_req_idle_timer->raw());
     doq->disconnect("Handshake timer expired");
@@ -302,7 +315,8 @@ void DoqUpstream::send_requests() {
 }
 
 Error<Upstream::InitError> DoqUpstream::init() {
-    auto error = this->init_url_port(/*allow_creds*/ false, /*allow_path*/ false, DEFAULT_DOQ_PORT, /*host_to_lowercase*/ false);
+    auto error = this->init_url_port(
+            /*allow_creds*/ false, /*allow_path*/ false, DEFAULT_DOQ_PORT, /*host_to_lowercase*/ false);
     if (error) {
         return error;
     }
@@ -439,9 +453,7 @@ coro::Task<Upstream::ExchangeResult> DoqUpstream::exchange(const ldns_pkt *reque
         co_return std::cv_status::timeout;
     };
     auto timeout = co_await parallel::any_of<std::cv_status>(
-            await_result(req),
-            await_timeout(config().loop, m_config.timeout)
-    );
+            await_result(req), await_timeout(config().loop, m_config.timeout));
     if (guard.expired()) {
         co_return make_error(DnsError::AE_SHUTTING_DOWN);
     }
@@ -506,6 +518,9 @@ void DoqUpstream::on_socket_read(void *arg, Uint8View data) {
     auto *ctx = (SocketContext *) arg;
     DoqUpstream *self = ctx->upstream;
     tracelog(self->m_log, "{}(): Read {} bytes from {}", __func__, data.size(), ctx->socket->get_peer().str());
+    if (self->m_state == STOP) {
+        return;
+    }
 
     std::string disconnect_reason;
     if (int ret = self->feed_data(data); ret != NETWORK_ERR_OK) {
@@ -551,7 +566,7 @@ void DoqUpstream::on_socket_read(void *arg, Uint8View data) {
 fail:
     // if the peer is not yet selected, and we have some pending endpoints,
     // do not disconnect immediately - wait for other ones
-    if (const ConnectionHandshakeInitialInfo * info; self->m_conn_state.is_peer_selected()
+    if (const ConnectionHandshakeInitialInfo *info; self->m_conn_state.is_peer_selected()
             || nullptr == (info = std::get_if<ConnectionHandshakeInitialInfo>(&self->m_conn_state.info))
             || info->sockets.empty()) {
         self->disconnect(disconnect_reason);
@@ -579,7 +594,7 @@ void DoqUpstream::on_socket_close(void *arg, Error<SocketError> error) {
     auto drop = self->m_conn_state.extract_socket(ctx);
     // if the peer is not yet selected and we have some pending endpoints,
     // do not disconnect immediately - wait for other ones
-    if (const ConnectionHandshakeInitialInfo * info; self->m_conn_state.is_peer_selected()
+    if (const ConnectionHandshakeInitialInfo *info; self->m_conn_state.is_peer_selected()
             || nullptr == (info = std::get_if<ConnectionHandshakeInitialInfo>(&self->m_conn_state.info))
             || info->sockets.empty()) {
         self->disconnect("Connection is closed");
@@ -597,17 +612,20 @@ int DoqUpstream::on_write() {
     assert(m_send_buf.left() >= m_max_pktlen);
 
     if (auto rv = write_streams(); rv != NETWORK_ERR_OK) {
-        schedule_retransmit();
+        if (m_state != STOP) {
+            schedule_retransmit();
+        }
         return rv;
     }
 
-    schedule_retransmit();
+    if (m_state != STOP) {
+        schedule_retransmit();
+    }
     return 0;
 }
 
-static int ag_evbuffer_peek_exact(struct evbuffer *buffer, ev_ssize_t len,
-                                  struct evbuffer_ptr *start_at,
-                                  struct evbuffer_iovec *vec_out, int n_vec) {
+static int ag_evbuffer_peek_exact(struct evbuffer *buffer, ev_ssize_t len, struct evbuffer_ptr *start_at,
+        struct evbuffer_iovec *vec_out, int n_vec) {
     int vec_cnt = evbuffer_peek(buffer, len, start_at, vec_out, n_vec);
     if (vec_cnt < 0) {
         return vec_cnt;
@@ -615,9 +633,7 @@ static int ag_evbuffer_peek_exact(struct evbuffer *buffer, ev_ssize_t len,
     int idx = 0;
     size_t remaining = len;
     while (idx < vec_cnt && remaining) {
-        if (remaining < vec_out[idx].iov_len) {
-            vec_out[idx].iov_len = remaining;
-        }
+        vec_out[idx].iov_len = std::min(remaining, vec_out[idx].iov_len);
         remaining -= vec_out[idx].iov_len;
         idx += 1;
     }
@@ -631,6 +647,9 @@ static int ag_evbuffer_peek_exact(struct evbuffer *buffer, ev_ssize_t len,
  * @param eof_out Output variable for eof flag
  */
 int64_t DoqUpstream::peek_stream_data(struct evbuffer_iovec *vec_out, int *n_vec_out, bool *eof_out) {
+    if (!m_conn) {
+        return -1;
+    }
     while (!m_stream_send_queue.empty() && ngtcp2_conn_get_max_data_left(m_conn)) {
         int64_t stream_id = m_stream_send_queue.front();
         auto it = m_streams.find(stream_id);
@@ -646,7 +665,8 @@ int64_t DoqUpstream::peek_stream_data(struct evbuffer_iovec *vec_out, int *n_vec
         }
         evbuffer_ptr position = {};
         evbuffer_ptr_set(buf, &position, st.send_info.read_position, EVBUFFER_PTR_SET);
-        *n_vec_out = ag_evbuffer_peek_exact(buf, evbuffer_get_length(buf), &position, vec_out, *n_vec_out);
+        *n_vec_out = ag_evbuffer_peek_exact(
+                buf, static_cast<ssize_t>(evbuffer_get_length(buf)), &position, vec_out, *n_vec_out);
         if (eof_out) {
             *eof_out = true;
         }
@@ -656,6 +676,9 @@ int64_t DoqUpstream::peek_stream_data(struct evbuffer_iovec *vec_out, int *n_vec
 }
 
 int DoqUpstream::write_streams() {
+    if (!m_conn) {
+        return NETWORK_ERR_DROP_CONN;
+    }
     ngtcp2_vec vec[2];
 
     for (;;) {
@@ -691,7 +714,7 @@ int DoqUpstream::write_streams() {
                 continue;
             case NGTCP2_ERR_WRITE_MORE:
                 assert(ndatalen > 0);
-                m_streams[stream_id].send_info.read_position += ndatalen;
+                m_streams[stream_id].send_info.read_position += static_cast<int>(ndatalen);
                 continue;
             }
             errlog(m_log, "ngtcp2_conn_write_stream: {}", ngtcp2_strerror(nwrite));
@@ -703,7 +726,7 @@ int DoqUpstream::write_streams() {
         }
 
         if (ndatalen > 0) {
-            m_streams[stream_id].send_info.read_position += ndatalen;
+            m_streams[stream_id].send_info.read_position += static_cast<int>(ndatalen);
         }
 
         m_send_buf.push(nwrite);
@@ -779,6 +802,7 @@ int DoqUpstream::connect_to_peers(const std::vector<SocketAddress> &current_addr
     return NETWORK_ERR_OK;
 }
 
+// NOLINTBEGIN(cert-dcl50-cpp)
 void DoqUpstream::log_quic_packets(void *user_data, const char *format, ...) {
     char buffer[QUIC_PACKET_TRACE_BUFSIZE];
     va_list args;
@@ -788,6 +812,7 @@ void DoqUpstream::log_quic_packets(void *user_data, const char *format, ...) {
     auto *doq = (DoqUpstream *) user_data;
     tracelog(doq->m_log, "{}", buffer);
 }
+// NOLINTEND(cert-dcl50-cpp)
 
 int DoqUpstream::init_quic_conn(const Socket *connected_socket) {
     // as for now we don't support the QUIC connection migration it does not matter
@@ -823,7 +848,8 @@ int DoqUpstream::init_quic_conn(const Socket *connected_socket) {
         cid.datalen = len;
         RAND_bytes(cid.data, cid.datalen);
     };
-    ngtcp2_cid scid, dcid;
+    ngtcp2_cid scid;
+    ngtcp2_cid dcid;
     generate_cid(scid, 17);
     generate_cid(dcid, 18);
 
@@ -874,9 +900,26 @@ int DoqUpstream::init_ssl() {
     SSL_set_connect_state(m_ssl.get());
     SSL_set_quic_use_legacy_codepoint(m_ssl.get(), m_quic_version != NGTCP2_PROTO_VER_V1);
 
-    std::string alpn, printable;
+#ifdef OPENSSL_IS_BORINGSSL
+    if (m_options.enable_post_quantum_cryptography) {
+        static constexpr uint16_t PQ_GROUPS[] = {
+                SSL_GROUP_X25519_MLKEM768,
+                SSL_GROUP_X25519,
+                SSL_GROUP_SECP256R1,
+                SSL_GROUP_SECP384R1,
+        };
+        if (!SSL_set1_group_ids(m_ssl.get(), PQ_GROUPS, std::size(PQ_GROUPS))) {
+            warnlog(m_log, "Failed to set post-quantum groups, continuing with defaults");
+        } else {
+            tracelog(m_log, "Post-quantum cryptography enabled (ML-KEM-768)");
+        }
+    }
+#endif // OPENSSL_IS_BORINGSSL
+
+    std::string alpn;
+    std::string printable;
     for (auto &dq_alpn : DQ_ALPNS) {
-        alpn.push_back(dq_alpn.size());
+        alpn.push_back(static_cast<char>(dq_alpn.size()));
         alpn.append(dq_alpn);
         printable.push_back(' ');
         printable.append(dq_alpn);
@@ -897,6 +940,9 @@ int DoqUpstream::init_ssl() {
 }
 
 void DoqUpstream::write_client_handshake(ngtcp2_encryption_level level, const uint8_t *data, size_t datalen) {
+    if (!m_conn) {
+        return;
+    }
     auto &crypto = m_crypto[level];
     crypto.data.emplace_back(data, datalen);
     auto &buf = crypto.data.back();
@@ -904,6 +950,9 @@ void DoqUpstream::write_client_handshake(ngtcp2_encryption_level level, const ui
 }
 
 int DoqUpstream::feed_data(Uint8View data) {
+    if (!m_conn) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
     ngtcp2_path path = {{.addr = (sockaddr *) m_local_addr.c_sockaddr(), .addrlen = m_local_addr.c_socklen()},
             {.addr = (sockaddr *) m_remote_addr_empty.c_sockaddr(), .addrlen = m_remote_addr_empty.c_socklen()}};
 
@@ -964,7 +1013,12 @@ int DoqUpstream::recv_crypto_data(ngtcp2_conn *conn, ngtcp2_encryption_level cry
 
 int DoqUpstream::on_key(
         ngtcp2_encryption_level level, const uint8_t *rx_secret, const uint8_t *tx_secret, size_t secretlen) {
-    std::array<uint8_t, 64> rx_key{}, rx_iv{}, rx_hp_key{}, tx_key{}, tx_iv{}, tx_hp_key{};
+    std::array<uint8_t, 64> rx_key{};
+    std::array<uint8_t, 64> rx_iv{};
+    std::array<uint8_t, 64> rx_hp_key{};
+    std::array<uint8_t, 64> tx_key{};
+    std::array<uint8_t, 64> tx_iv{};
+    std::array<uint8_t, 64> tx_hp_key{};
 
     std::string direction;
     if (rx_secret) {
@@ -994,7 +1048,8 @@ int DoqUpstream::update_key(ngtcp2_conn *conn, uint8_t *rx_secret, uint8_t *tx_s
         ngtcp2_crypto_aead_ctx *rx_aead_ctx, uint8_t *rx_iv, ngtcp2_crypto_aead_ctx *tx_aead_ctx, uint8_t *tx_iv,
         const uint8_t *current_rx_secret, const uint8_t *current_tx_secret, size_t secretlen, void * /*user_data*/) {
 
-    std::array<uint8_t, 64> rx_key{}, tx_key{};
+    std::array<uint8_t, 64> rx_key{};
+    std::array<uint8_t, 64> tx_key{};
 
     if (ngtcp2_crypto_update_key(conn, rx_secret, tx_secret, rx_aead_ctx, rx_key.data(), rx_iv, tx_aead_ctx,
                 tx_key.data(), tx_iv, current_rx_secret, current_tx_secret, secretlen)
@@ -1150,7 +1205,7 @@ int DoqUpstream::acked_stream_data_offset(ngtcp2_conn * /*conn*/, int64_t stream
         auto &stream = it->second;
         evbuffer *buf = stream.send_info.buf.get();
         evbuffer_drain(buf, datalen);
-        stream.send_info.read_position -= datalen;
+        stream.send_info.read_position -= static_cast<int>(datalen);
         if (stream.send_info.read_position < 0) {
             errlog(doq->m_log, "read_position={} datalen={}", stream.send_info.read_position, datalen);
         }
@@ -1211,11 +1266,17 @@ void DoqUpstream::disconnect(std::string_view reason) {
 }
 
 int DoqUpstream::handle_expiry() {
+    if (!m_conn) {
+        return 0;
+    }
     auto now = get_tstamp();
     return ngtcp2_conn_handle_expiry(m_conn, now);
 }
 
 void DoqUpstream::schedule_retransmit() {
+    if (!m_conn) {
+        return;
+    }
     auto expiry_ns = ngtcp2_conn_get_expiry(m_conn);
     if (expiry_ns > NEVER) {
         return;
@@ -1239,16 +1300,16 @@ int DoqUpstream::ssl_verify_callback(X509_STORE_CTX *ctx, void * /*arg*/) {
 
     const CertificateVerifier *verifier = doq->m_config.socket_factory->get_certificate_verifier();
     if (verifier == nullptr) {
-        dbglog(doq->m_log, "Cannot verify certificate due to verifier is not set");
+        warnlog(doq->m_log, "Cannot verify certificate for '{}' due to verifier is not set", doq->m_url.get_hostname());
         return 0;
     }
 
-    if (auto err = verifier->verify(ctx, doq->m_url.get_hostname(), doq->m_fingerprints)) {
-        dbglog(doq->m_log, "Failed to verify certificate: {}", *err);
+    std::string_view hostname = doq->m_url.get_hostname();
+    if (auto err = verifier->verify(ctx, hostname, doq->m_fingerprints)) {
+        warnlog(doq->m_log, "Failed to verify certificate for '{}': {}", hostname, *err);
+        warnlog(doq->m_log, "  {}", get_cert_diagnostic_info(ctx));
         return 0;
     }
-
-    tracelog(doq->m_log, "Verified successfully");
 
     return 1;
 }

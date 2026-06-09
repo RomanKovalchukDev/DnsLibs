@@ -53,8 +53,10 @@ add_definitions(-DFMT_EXCEPTIONS=0)
 add_library(AGDnsProxy SHARED
     AGDnsProxyEvents.h
     AGDnsProxy.h AGDnsProxy.mm
+    AGDnsTunListener.h AGDnsTunListener.mm
     AGDnsProxyXPC.h AGDnsProxyXPC.mm
     AGDnsXPCObject.h AGDnsXPCObject.m
+    AGDnsAppProxyFlowManager.h AGDnsAppProxyFlowManager.mm
     AGDnsProxyModule.h module.modulemap
 )
 if("${TARGET_OS}" STREQUAL "macos")
@@ -65,7 +67,7 @@ set_property(TARGET AGDnsProxy PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_target_properties(AGDnsProxy PROPERTIES
     FRAMEWORK TRUE
     FRAMEWORK_VERSION A
-    VERSION 2.6.17
+    VERSION 2.8.53
     MACOSX_FRAMEWORK_INFO_PLIST "${INFOPLIST_FILE}"
     # MACOSX_FRAMEWORK_IDENTIFIER ca.cira.dnsfirewall.dnsproxy
     XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application: Canadian Internet Registration Authority (RJLNUGZH8C)"
@@ -76,9 +78,11 @@ set_target_properties(AGDnsProxy PROPERTIES
 set_property(TARGET AGDnsProxy PROPERTY PUBLIC_HEADER
     AGDnsProxy.h
     AGDnsProxyEvents.h
+    AGDnsTunListener.h
     AGDnsProxyModule.h
     AGDnsProxyXPC.h
     AGDnsXPCObject.h
+    AGDnsAppProxyFlowManager.h
 )
 set_property(SOURCE module.modulemap
         PROPERTY MACOSX_PACKAGE_LOCATION "Modules")
@@ -182,4 +186,25 @@ if("${TARGET_OS}" STREQUAL "macos")
             "-framework AGDnsProxy -framework Foundation")
     add_dependencies(test_AGDnsProxyStandalone AGDnsProxy)
     add_dependencies(tests test_AGDnsProxyStandalone)
+
+    add_executable(test_AGDnsProxyReapplySettings EXCLUDE_FROM_ALL test_AGDnsProxyReapplySettings.mm)
+    target_compile_options(test_AGDnsProxyReapplySettings PRIVATE "-fobjc-arc")
+    target_compile_options(test_AGDnsProxyReapplySettings PRIVATE -F${CMAKE_CURRENT_BINARY_DIR})
+    target_link_libraries(test_AGDnsProxyReapplySettings
+            "-F${CMAKE_CURRENT_BINARY_DIR}"
+            "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
+            "-framework AGDnsProxy -framework Foundation")
+    add_dependencies(test_AGDnsProxyReapplySettings AGDnsProxy)
+    add_dependencies(tests test_AGDnsProxyReapplySettings)
+    add_test(AGDnsProxyReapplySettingsTest test_AGDnsProxyReapplySettings)
+
+    add_executable(test_AGDnsTunListener EXCLUDE_FROM_ALL test_AGDnsTunListener.mm)
+    target_compile_options(test_AGDnsTunListener PRIVATE "-fobjc-arc")
+    target_compile_options(test_AGDnsTunListener PRIVATE -F${CMAKE_CURRENT_BINARY_DIR})
+    target_link_libraries(test_AGDnsTunListener
+            "-F${CMAKE_CURRENT_BINARY_DIR}"
+            "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
+            "-framework AGDnsProxy -framework Foundation -framework NetworkExtension")
+    add_dependencies(test_AGDnsTunListener AGDnsProxy)
+    add_dependencies(tests test_AGDnsTunListener)
 endif()

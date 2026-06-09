@@ -1,9 +1,9 @@
 #pragma once
 
-#include <uv.h>
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <uv.h>
 
 #include "common/logger.h"
 #include "common/utils.h"
@@ -13,13 +13,13 @@ namespace ag::dns {
 template <typename UvT>
 class Uv : public std::enable_shared_from_this<Uv<UvT>> {
 protected:
-    struct ConstructorAccess {
-    };
+    struct ConstructorAccess {};
+
 public:
     Uv(const ConstructorAccess & /*unused*/, void *parent)
-            : m_log(logger_name()),
-              m_handle(new UvT{}),
-              m_parent(parent) {
+            : m_log(logger_name())
+            , m_handle(new UvT{})
+            , m_parent(parent) {
         tracelog(m_log, "Created {}, handle {}", (void *) this, (void *) m_handle);
     }
 
@@ -80,7 +80,7 @@ public:
         delete weak_from_data(m_handle->data);
         m_handle->data = nullptr;
         if constexpr (std::is_same_v<std::remove_cvref_t<UvT>, uv_loop_t>) {
-            if (((uv_loop_t *) m_handle)->time != 0) {
+            if (((uv_loop_t *) m_handle)->internal_fields != nullptr) {
                 uv_loop_close((uv_loop_t *) m_handle);
             }
             delete m_handle;
@@ -95,7 +95,7 @@ public:
 
     static void on_close(uv_handle_t *handle) {
         Logger log(logger_name());
-        tracelog(log, "Destroyed handle {}", (void *)handle);
+        tracelog(log, "Destroyed handle {}", (void *) handle);
         delete (UvT *) handle;
     }
 

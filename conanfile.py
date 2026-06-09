@@ -1,8 +1,9 @@
 from conan import ConanFile
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 from conan.tools.files import patch, copy
+from conan.tools.scm import Git
 from os.path import join
-import re
+import re, os, shutil
 
 
 class DnsLibsConan(ConanFile):
@@ -17,10 +18,12 @@ class DnsLibsConan(ConanFile):
     options = {
         "shared": [True, False],
         "fPIC": [True, False],
+        "tcpip": [True, False],
     }
     default_options = {
         "shared": False,
         "fPIC": True,
+        "tcpip": True,
     }
     # A list of paths to patches. The paths must be relative to the conanfile directory.
     # They are applied in case of the version equals 777 and mostly intended to be used
@@ -29,23 +32,25 @@ class DnsLibsConan(ConanFile):
     exports_sources = patch_files
 
     def requirements(self):
+        self.requires("cxxopts/3.1.1", transitive_headers=True)
         self.requires("libevent/2.1.11@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("libsodium/1.0.18@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("libuv/1.41.0@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("klib/2021-04-06@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("ldns/2024-06-20@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("magic_enum/0.9.5", transitive_headers=True)
-        self.requires("native_libs_common/12ad28a@adguard_team/native_libs_common", transitive_headers=True)
+        self.requires("native_libs_common/v8.1.33-cira@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("ngtcp2/1.0.1@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("pcre2/10.37@adguard_team/native_libs_common", transitive_headers=True)
         self.requires("tldregistry/2022-12-26@adguard_team/native_libs_common", transitive_headers=True)
         if "mips" in str(self.settings.arch):
-            self.requires("openssl/3.1.5-quic1@adguard_team/native_libs_common", transitive_headers=True, force=True)
+            self.requires("openssl/3.1.5-quic1@adguard/oss", transitive_headers=True, force=True)
         else:
-            self.requires("openssl/boring-2023-05-17@adguard_team/native_libs_common", transitive_headers=True)
+            self.requires("openssl/boring-2024-09-13@adguard/oss", transitive_headers=True)
         self.requires("ada/2.7.4", transitive_headers=True)
         if self.settings.os == "Windows":
-            self.requires("detours/2021-04-14@adguard_team/native_libs_common", transitive_headers=True)
+            self.requires("detours/2021-04-14@adguard/oss", transitive_headers=True)
+            self.requires("nlohmann_json/3.12.0")
 
     def build_requirements(self):
         self.test_requires("gtest/1.14.0")
@@ -59,20 +64,27 @@ class DnsLibsConan(ConanFile):
         if self.settings.os == "Windows":
             del self.options.fPIC
 
+    def export_sources(self):
+        if self.version == "local":
+            git = Git(self)
+            included = git.included_files()
+            for i in included:
+                dst = os.path.join(self.export_sources_folder, i)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(i, dst)
+
     def source(self):
-        self.run(f"git init . && git remote add origin {self.vcs_url} && git fetch")
-        if re.match(r'\d+\.\d+\.\d+', self.version) is not None:
-            version_hash = self.conan_data["commit_hash"][self.version]["hash"]
-            self.run("git checkout -f %s" % version_hash)
-        else:
-            self.run("git checkout -f %s" % self.version)
-            for p in self.patch_files:
-                patch(self, patch_file=p)
+        if os.listdir(self.source_folder):
+            return
+
+        git = Git(self)
+        git.fetch_commit(self.vcs_url, f"v{self.version}")
 
     def generate(self):
         deps = CMakeDeps(self)
         deps.generate()
         tc = CMakeToolchain(self)
+        tc.cache_variables["DNSLIBS_ENABLE_TCPIP"] = self.info.options.tcpip
         tc.generate()
 
     def layout(self):
@@ -116,8 +128,11 @@ class DnsLibsConan(ConanFile):
             "dnslibs_net",
             "dnslibs_common",
         ]
+        if self.options.tcpip:
+            self.cpp_info.libs.append("dnslibs_tcpip")
         self.cpp_info.libdirs = ['lib']
         self.cpp_info.requires = [
+            "cxxopts::cxxopts",
             "magic_enum::magic_enum",
             "pcre2::pcre2",
             "libsodium::libsodium",
@@ -133,3 +148,4 @@ class DnsLibsConan(ConanFile):
         ]
         if self.settings.os == "Windows":
             self.cpp_info.requires.append("detours::detours")
+            self.cpp_info.requires.append("nlohmann_json::nlohmann_json")

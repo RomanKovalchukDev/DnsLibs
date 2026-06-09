@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "common/net_utils.h"
+#include "common/wfp_firewall.h"
 #include "dns/dnsfilter/dnsfilter.h"
 #include "dns/proxy/dnsproxy.h"
 #include "dns/upstream/upstream_utils.h"
@@ -289,10 +291,12 @@ static ag_dnsproxy_settings *marshal_settings(const DnsProxySettings &settings) 
     c_settings->enable_dnssec_ok = settings.enable_dnssec_ok;
     c_settings->enable_retransmission_handling = settings.enable_retransmission_handling;
     c_settings->block_ech = settings.block_ech;
+    c_settings->block_h3_alpn = settings.block_h3_alpn;
     c_settings->enable_parallel_upstream_queries = settings.enable_parallel_upstream_queries;
     c_settings->enable_fallback_on_upstreams_failure = settings.enable_fallback_on_upstreams_failure;
     c_settings->enable_servfail_on_upstreams_failure = settings.enable_servfail_on_upstreams_failure;
     c_settings->enable_http3 = settings.enable_http3;
+    c_settings->enable_post_quantum_cryptography = settings.enable_post_quantum_cryptography;
 
     return c_settings;
 }
@@ -345,6 +349,7 @@ static DnsRequestProcessedEvent marshal_processed_event(const ag_dns_request_pro
             event.rules.emplace_back(rule);
         }
     }
+    event.blocking_reason = (DnsBlockingReason) c_event->blocking_reason;
     return event;
 }
 
@@ -511,16 +516,18 @@ static DnsProxySettings marshal_settings(const ag_dnsproxy_settings *c_settings)
 
     settings.listeners = marshal_listeners(c_settings->listeners.data, c_settings->listeners.size);
     settings.outbound_proxy = marshal_outbound_proxy(c_settings->outbound_proxy);
-    settings.filter_params.filters
-            = marshal_filters(c_settings->filter_params.filters.data, c_settings->filter_params.filters.size);
+    settings.filter_params.filters =
+            marshal_filters(c_settings->filter_params.filters.data, c_settings->filter_params.filters.size);
     settings.optimistic_cache = c_settings->optimistic_cache;
     settings.enable_dnssec_ok = c_settings->enable_dnssec_ok;
     settings.enable_retransmission_handling = c_settings->enable_retransmission_handling;
     settings.block_ech = c_settings->block_ech;
+    settings.block_h3_alpn = c_settings->block_h3_alpn;
     settings.enable_parallel_upstream_queries = c_settings->enable_parallel_upstream_queries;
     settings.enable_fallback_on_upstreams_failure = c_settings->enable_fallback_on_upstreams_failure;
     settings.enable_servfail_on_upstreams_failure = c_settings->enable_servfail_on_upstreams_failure;
     settings.enable_http3 = c_settings->enable_http3;
+    settings.enable_post_quantum_cryptography = c_settings->enable_post_quantum_cryptography;
 
     return settings;
 }
@@ -535,8 +542,7 @@ static DnsProxyEvents marshal_events(const ag_dnsproxy_events *c_events) {
         return events;
     }
     if (c_events->on_request_processed) {
-        events.on_request_processed = [cb = c_events->on_request_processed](
-                                              const DnsRequestProcessedEvent &event) {
+        events.on_request_processed = [cb = c_events->on_request_processed](const DnsRequestProcessedEvent &event) {
             ag_dns_request_processed_event e{};
 
             e.whitelist = event.whitelist;
@@ -555,6 +561,7 @@ static DnsProxyEvents marshal_events(const ag_dnsproxy_events *c_events) {
             e.error = c_str_if_not_empty(event.error);
             e.status = c_str_if_not_empty(event.status);
             e.upstream_id = event.upstream_id ? &*event.upstream_id : nullptr;
+            e.blocking_reason = (ag_dns_blocking_reason) event.blocking_reason;
 
             std::vector<const char *> c_rules;
             c_rules.reserve(event.rules.size());
@@ -568,9 +575,9 @@ static DnsProxyEvents marshal_events(const ag_dnsproxy_events *c_events) {
         };
     }
     if (c_events->on_certificate_verification) {
-        events.on_certificate_verification
-                = [cb = c_events->on_certificate_verification](
-                          const CertificateVerificationEvent &event) -> std::optional<std::string> {
+        events.on_certificate_verification =
+                [cb = c_events->on_certificate_verification](
+                        const CertificateVerificationEvent &event) -> std::optional<std::string> {
             ag_certificate_verification_event e{};
 
             e.certificate.size = event.certificate.size();
@@ -636,6 +643,29 @@ void ag_dnsproxy_deinit(ag_dnsproxy *handle) {
     delete proxy;
 }
 
+bool ag_dnsproxy_reapply_settings(ag_dnsproxy *handle, const ag_dnsproxy_settings *c_settings,
+        ag_dnsproxy_reapply_options options, ag_dnsproxy_init_result *out_result, const char **out_message) {
+    auto *proxy = (DnsProxy *) handle;
+    auto settings = marshal_settings(c_settings);
+
+    auto [ret, err_or_warn] = proxy->reapply_settings(std::move(settings), DnsProxy::ReapplyOptions(options));
+
+    if (ret) {
+        if (err_or_warn) {
+            *out_result = (ag_dnsproxy_init_result) err_or_warn->value();
+            *out_message = strdup(err_or_warn->str().c_str());
+        } else {
+            *out_result = AGDPIR_OK;
+        }
+        return true;
+    }
+
+    assert(err_or_warn);
+    *out_result = (ag_dnsproxy_init_result) err_or_warn->value();
+    *out_message = strdup(err_or_warn->str().c_str());
+    return false;
+}
+
 static std::optional<DnsMessageInfo> marshal_dns_message_info(const ag_dns_message_info *c_info) {
     if (!c_info) {
         return std::nullopt;
@@ -699,7 +729,7 @@ ag_dns_stamp *ag_dns_stamp_from_str(const char *stamp_str, const char **error) {
         }
     }
     if (stamp->props.has_value()) {
-        c_result->properties = (ag_server_informal_properties*) std::malloc(sizeof(ag_server_informal_properties));
+        c_result->properties = (ag_server_informal_properties *) std::malloc(sizeof(ag_server_informal_properties));
         *c_result->properties = (ag_server_informal_properties) stamp->props.value();
     }
     return c_result;
@@ -762,6 +792,10 @@ const char *ag_dnsproxy_version() {
     return DnsProxy::version();
 }
 
+void ag_dnsproxy_crash() {
+    *(int *) 0x42 = 0x42;
+}
+
 const char *ag_dns_stamp_to_str(ag_dns_stamp *c_stamp) {
     if (c_stamp->properties) {
         ServerStamp stamp = marshal_stamp(c_stamp);
@@ -769,7 +803,6 @@ const char *ag_dns_stamp_to_str(ag_dns_stamp *c_stamp) {
     }
 
     return ag_dns_stamp_pretty_url(c_stamp);
-    
 }
 
 const char *ag_dns_stamp_pretty_url(ag_dns_stamp *c_stamp) {
@@ -793,10 +826,11 @@ ag_dns_filtering_log_action *ag_dns_filtering_log_action_from_event(const ag_dns
         templates[i] = strdup(action->templates[i].text.c_str());
     }
     return new ag_dns_filtering_log_action{
-            .templates = {
-                    .data = (const ag_dns_rule_template **) templates,
-                    .size = (uint32_t) action->templates.size(),
-            },
+            .templates =
+                    {
+                            .data = (const ag_dns_rule_template **) templates,
+                            .size = (uint32_t) action->templates.size(),
+                    },
             .allowed_options = action->allowed_options,
             .required_options = action->required_options,
             .blocking = action->blocking,
@@ -819,4 +853,53 @@ char *ag_dns_generate_rule_with_options(
     auto event = marshal_processed_event(c_event);
     DnsFilter::RuleTemplate rule_template((const char *) tmplt);
     return strdup(DnsFilter::generate_rule(rule_template, event, options).c_str());
+}
+
+char *ag_dns_get_preferred_adapter_guid() {
+    auto guid = utils::win_get_preferred_adapter_guid();
+    return strdup(guid.c_str());
+}
+
+uint32_t ag_dns_set_if_nameserver(const char *dns_list, const char *if_guid, bool ipv6) {
+    return utils::win_set_if_nameserver(dns_list, if_guid, ipv6);
+}
+
+char *ag_dns_get_if_nameserver(const char *if_guid, bool ipv6) {
+    auto nameserver = utils::win_get_if_nameserver(if_guid, ipv6);
+    return nameserver.has_value() ? strdup(nameserver->c_str()) : nullptr;
+}
+
+ag_wfpfirewall *ag_dns_wfpfirewall_init(const wchar_t *name, uint32_t exclude_pid) {
+    return new WfpFirewall(name, exclude_pid);
+}
+
+void ag_dns_wfpfirewall_deinit(ag_wfpfirewall *fw) {
+    delete (WfpFirewall *) fw;
+}
+
+char *ag_dns_wfpfirewall_restrict_dns_to(ag_wfpfirewall *fw, const char *allowed_v4, const char *allowed_v6) {
+    auto *firewall = (WfpFirewall *) fw;
+
+    std::vector<std::string_view> split = utils::split_by(allowed_v4, ',');
+    std::vector<CidrRange> v4_ranges;
+    v4_ranges.reserve(split.size());
+    for (std::string_view v4 : split) {
+        CidrRange range{v4};
+        if (range.valid()) {
+            v4_ranges.emplace_back(std::move(range));
+        }
+    }
+
+    split = utils::split_by(allowed_v6, ',');
+    std::vector<CidrRange> v6_ranges;
+    v6_ranges.reserve(split.size());
+    for (std::string_view v6 : split) {
+        CidrRange range{v6};
+        if (range.valid()) {
+            v6_ranges.emplace_back(std::move(range));
+        }
+    }
+
+    auto error = firewall->restrict_dns_to(v4_ranges, v6_ranges);
+    return error ? strdup(error->str().c_str()) : nullptr;
 }

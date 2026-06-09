@@ -1,15 +1,15 @@
 #pragma once
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef _WIN32
-#  define AG_EXPORT extern __declspec(dllexport)
+#define AG_EXPORT extern __declspec(dllexport)
 #elif defined(__GNUC__)
-#  define AG_EXPORT __attribute__ ((visibility("default")))
+#define AG_EXPORT __attribute__((visibility("default")))
 #else
-#  define AG_EXPORT
+#define AG_EXPORT
 #endif
 
 /**
@@ -34,7 +34,11 @@
  *  @endcode
  *  @ingroup defines
  */
-#define NAMED_ARRAY_OF(T, N) struct N { T *data; uint32_t size; }
+#define NAMED_ARRAY_OF(T, N)                                                                                           \
+    struct N {                                                                                                         \
+        T *data;                                                                                                       \
+        uint32_t size;                                                                                                 \
+    }
 
 /** @def ARRAY_OF(T)
  *  A macro that defines a typed array structure with a pointer to the data and its size.
@@ -48,7 +52,11 @@
  *  @endcode
  *  @ingroup defines
  */
-#define ARRAY_OF(T) struct { T *data; uint32_t size; }
+#define ARRAY_OF(T)                                                                                                    \
+    struct {                                                                                                           \
+        T *data;                                                                                                       \
+        uint32_t size;                                                                                                 \
+    }
 
 #ifdef __cplusplus
 extern "C" {
@@ -139,8 +147,8 @@ typedef struct {
     uint32_t outbound_interface_index;
 
     /**
-     * (Optional) List of upstreams base64 encoded SPKI fingerprints to verify. If at least one of them is matched in the
-     * certificate chain, the verification will be successful
+     * (Optional) List of upstreams base64 encoded SPKI fingerprints to verify. If at least one of them is matched in
+     * the certificate chain, the verification will be successful
      */
     ARRAY_OF(const char *) fingerprints;
 } ag_upstream_options;
@@ -203,6 +211,45 @@ typedef enum {
      */
     AGBM_UNSPECIFIED_ADDRESS,
 } ag_dnsproxy_blocking_mode;
+
+/**
+ * @ingroup enums
+ * DNS blocking reason
+ */
+typedef enum {
+    /** Not blocked */
+    AGDBR_NONE,
+    /** Mozilla DoH detection */
+    AGDBR_MOZILLA_DOH_DETECTION,
+    /** DDR blocking */
+    AGDBR_DDR,
+    /** IPv6 blocking */
+    AGDBR_IPV6,
+    /** Query matched by rule */
+    AGDBR_QUERY_MATCHED_BY_RULE,
+    /** CNAME matched by rule */
+    AGDBR_CNAME_MATCHED_BY_RULE,
+    /** IP matched by rule */
+    AGDBR_IP_MATCHED_BY_RULE,
+    /** HTTPS matched by rule */
+    AGDBR_HTTPS_MATCHED_BY_RULE,
+} ag_dns_blocking_reason;
+
+/**
+ * @ingroup enums
+ * Options for reapplying DNS proxy settings.
+ *
+ * These flags can be combined using bitwise OR to control which parts of the configuration
+ * should be reloaded without full reinitialization.
+ */
+typedef enum {
+    /** No changes, no-op */
+    AGDPRO_NONE = 0,
+    /** Reload all DNS settings except listeners and filter_params */
+    AGDPRO_SETTINGS = 1 << 0,
+    /** Reload filter parameters (filter_params) */
+    AGDPRO_FILTERS = 1 << 1,
+} ag_dnsproxy_reapply_options;
 
 /**
  * @struct ag_proxy_settings_overrides
@@ -322,7 +369,6 @@ typedef struct {
     NAMED_ARRAY_OF(ag_filter_params, filters_s) filters;
 } ag_filter_engine_params;
 
-
 /**
  * @struct ag_dnsproxy_settings
  * Represents settings for the AdGuard DNS proxy.
@@ -386,6 +432,8 @@ typedef struct {
     bool enable_retransmission_handling;
     /** If enabled, strip Encrypted Client Hello parameters from responses */
     bool block_ech;
+    /** If enabled, remove h3 from ALPN parameter in HTTPS records */
+    bool block_h3_alpn;
     /** If true, all upstreams are queried in parallel, and the first response is returned */
     bool enable_parallel_upstream_queries;
     /**
@@ -400,6 +448,8 @@ typedef struct {
     bool enable_servfail_on_upstreams_failure;
     /** Enable HTTP/3 for DNS-over-HTTPS upstreams if it's able to connect quicker */
     bool enable_http3;
+    /** Enable post-quantum cryptography */
+    bool enable_post_quantum_cryptography;
 } ag_dnsproxy_settings;
 
 /**
@@ -441,6 +491,8 @@ typedef struct {
     bool cache_hit;
     /** True if this response has DNSSEC rrsig */
     bool dnssec;
+    /** DNS blocking reason */
+    ag_dns_blocking_reason blocking_reason;
 } ag_dns_request_processed_event;
 
 /**
@@ -506,7 +558,6 @@ typedef ag_certificate_verification_result (*ag_certificate_verification_cb)(con
  * @param length The length of the log message, in bytes
  */
 typedef void (*ag_log_cb)(void *attachment, ag_log_level level, const char *message, uint32_t length);
-
 
 /**
  * @struct ag_dnsproxy_events
@@ -682,6 +733,12 @@ typedef void (*ag_handle_message_async_cb)(const ag_buffer *result);
 typedef void ag_dnsproxy;
 
 /**
+ * @ingroup defines
+ * An opaque data type representing a WFP firewall.
+ */
+typedef void ag_wfpfirewall;
+
+/**
  * @defgroup api API functions
  * This collection of functions enables interaction with a proxy server and related objects,
  * including logging capabilities and more.
@@ -716,7 +773,7 @@ typedef void ag_dnsproxy;
  * @return The proxy handle, or NULL in case of an error
  */
 AG_EXPORT ag_dnsproxy *ag_dnsproxy_init(const ag_dnsproxy_settings *settings, const ag_dnsproxy_events *events,
-                                        ag_dnsproxy_init_result *out_result, const char **out_message);
+        ag_dnsproxy_init_result *out_result, const char **out_message);
 
 /**
  * @ingroup api
@@ -724,6 +781,23 @@ AG_EXPORT ag_dnsproxy *ag_dnsproxy_init(const ag_dnsproxy_settings *settings, co
  * @param proxy a proxy handle
  */
 AG_EXPORT void ag_dnsproxy_deinit(ag_dnsproxy *proxy);
+
+/**
+ * @ingroup api
+ * @brief Reapply DNS proxy settings with selective reloading
+ *
+ * This function allows updating DNS proxy configuration without full reinitialization.
+ * You can selectively reload different parts of the configuration using ag_dnsproxy_reapply_options flags.
+ *
+ * @param proxy a proxy handle
+ * @param settings new DNS proxy configuration to apply
+ * @param options bitwise OR combination of ag_dnsproxy_reapply_options flags
+ * @param out_result upon return, contains the result of the operation
+ * @param out_message upon return, contains the error or warning message, or is unchanged
+ * @return true if reapplying succeeded, false otherwise
+ */
+AG_EXPORT bool ag_dnsproxy_reapply_settings(ag_dnsproxy *proxy, const ag_dnsproxy_settings *settings,
+        ag_dnsproxy_reapply_options options, ag_dnsproxy_init_result *out_result, const char **out_message);
 
 /**
  * @ingroup api
@@ -742,8 +816,8 @@ AG_EXPORT ag_buffer ag_dnsproxy_handle_message(ag_dnsproxy *proxy, ag_buffer mes
  * @param info additional parameters
  * @note The caller is responsible for freeing `message` with `ag_buffer_free()`
  */
-AG_EXPORT void ag_dnsproxy_handle_message_async(ag_dnsproxy *proxy, ag_buffer message, const ag_dns_message_info *info,
-        ag_handle_message_async_cb handler);
+AG_EXPORT void ag_dnsproxy_handle_message_async(
+        ag_dnsproxy *proxy, ag_buffer message, const ag_dns_message_info *info, ag_handle_message_async_cb handler);
 
 /**
  * @ingroup api1
@@ -868,6 +942,12 @@ AG_EXPORT const char *ag_dnsproxy_version();
 
 /**
  * @ingroup api
+ * Cause the current process to crash.
+ */
+AG_EXPORT void ag_dnsproxy_crash();
+
+/**
+ * @ingroup api
  * Free a string.
  */
 AG_EXPORT void ag_str_free(const char *str);
@@ -905,6 +985,65 @@ AG_EXPORT void ag_dns_filtering_log_action_free(ag_dns_filtering_log_action *act
  */
 AG_EXPORT char *ag_dns_generate_rule_with_options(
         const ag_dns_rule_template *tmplt, const ag_dns_request_processed_event *event, uint32_t options);
+
+/**
+ * @ingroup api
+ * Return the string representation of the GUID of the "preferred adapter": the network interface whose DNS
+ * settings Windows considers first when deciding where to send a DNS query.
+ * @return A NULL-terminated string which has to be freed with `ag_str_free()` on success, NULL on error.
+ */
+AG_EXPORT char *ag_dns_get_preferred_adapter_guid();
+
+/**
+ * @ingroup api
+ * Modify the DNS settings for a network interface.
+ *
+ * Equivalent to specifying the preferred/alternative DNS server in IPv4/IPv6 properties in the interface
+ * properties GUI. An empty string is equivalent to selecting "Obtain DNS server address automatically".
+ *
+ * @param dns_list NULL-terminated comma-separated list of nameserver addresses.
+ * @param if_guid NULL-terminated interface GUID string. See the `ConvertInterface<X>To<Y>` functions in `netioapi.h`.
+ * @param ipv6 `true` to modify the IPv6 properties, `false` for IPv4.
+ * @return `0` on success or a non-zero error code defined in Winerror.h. `FormatMessage` with the
+ *         `FORMAT_MESSAGE_FROM_SYSTEM` flag can be used to get a generic description of the error.
+ */
+AG_EXPORT uint32_t ag_dns_set_if_nameserver(const char *dns_list, const char *if_guid, bool ipv6);
+
+/**
+ * @ingroup api
+ * Get the current value of the NameServer property of an interface. Return NULL on any error,
+ * including if the property does not exist or isn't a null-terminated string.
+ *
+ * @param if_guid NULL-terminated interface GUID string. See the `ConvertInterface<X>To<Y>` functions in `netioapi.h`.
+ * @param ipv6 `true` to get the IPv6 property, `false` for IPv4.
+ * @return A NULL-terminated string which has to be freed with `ag_str_free()` on success, NULL on error.
+ */
+AG_EXPORT char *ag_dns_get_if_nameserver(const char *if_guid, bool ipv6);
+
+/**
+ * @ingroup api
+ * Create a new WFP firewall. Firewall restrictions will remain active until `ag_dns_wfpfirewall_deinit()` is called
+ * on the returned pointer.
+ *
+ * @param name A NULL-terminated wide character string which shall be included in WFP entities names.
+ * @param exclude_pid ID of the process to exclude from all restrictions. If `0`, exclude the current process.
+ */
+AG_EXPORT ag_wfpfirewall *ag_dns_wfpfirewall_init(const wchar_t *name, uint32_t exclude_pid);
+
+/**
+ * Block DNS traffic to/from all addresses except `allowed_v4` and `allowed_v6`.
+ * @param fw A pointer returned by `ag_dns_wfpfirewall_init()`.
+ * @param allowed_v4 NULL-terminated comma-separated list of IPv4 prefixes in CIDR notation.
+ * @param allowed_v6 NULL-terminated comma-separated list of IPv6 prefixes in CIDR notation.
+ * @return NULL on success, a NULL-terminated error description which has to be freed with `ag_str_free()` on error.
+ */
+AG_EXPORT char *ag_dns_wfpfirewall_restrict_dns_to(ag_wfpfirewall *fw, const char *allowed_v4, const char *allowed_v6);
+
+/**
+ * Revert all restrictions and destroy the firewall.
+ * @param fw A pointer returned by `ag_dns_wfpfirewall_init()`.
+ */
+AG_EXPORT void ag_dns_wfpfirewall_deinit(ag_wfpfirewall *fw);
 
 #ifdef __cplusplus
 } // extern "C"

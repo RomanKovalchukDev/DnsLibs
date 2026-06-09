@@ -7,9 +7,10 @@
 #include <jni.h>
 
 #include "android_utils.h"
-#include "scoped_jni_env.h"
 #include "jni_defs.h"
+#include "scoped_jni_env.h"
 
+#include "android_context_manager.h"
 #include "dns/proxy/dnsproxy.h"
 #include "dns/upstream/upstream_utils.h"
 
@@ -18,7 +19,13 @@ using namespace ag::dns;
 using namespace ag::jni;
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
+    AndroidContextManager::initialize(vm);
     return JNI_VERSION_1_2;
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_setApplicationContext(
+        JNIEnv *env, jclass clazz, jobject context) {
+    AndroidContextManager::set_application_context(context);
 }
 
 extern "C" JNIEXPORT jlong JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_create(JNIEnv *env, jobject jthis) {
@@ -35,6 +42,10 @@ extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_setLog
     Logger::set_log_level((LogLevel) level);
 }
 
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_crash(JNIEnv *env, jclass clazz) {
+    *((int *) 0x42) = 0x42;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_isValidRule(
         JNIEnv *env, jclass clazz, jstring str) {
     bool result = false;
@@ -47,8 +58,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_is
 }
 
 extern "C" JNIEXPORT jstring JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_testUpstreamNative(JNIEnv *env,
-        jclass clazz, jlong native_ptr, jobject upstream_settings, jlong timeout_ms,
-        jboolean ipv6, jobject events_adapter, jboolean offline) {
+        jclass clazz, jlong native_ptr, jobject upstream_settings, jlong timeout_ms, jboolean ipv6,
+        jobject events_adapter, jboolean offline) {
     auto *proxy = (AndroidDnsProxy *) native_ptr;
     return proxy->test_upstream(env, upstream_settings, timeout_ms, ipv6, events_adapter, offline);
 }
@@ -66,6 +77,13 @@ extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_deinit
     auto *proxy = (AndroidDnsProxy *) native_ptr;
     assert(proxy);
     proxy->deinit(env);
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_reapplySettings(
+        JNIEnv *env, jobject thiz, jlong native_ptr, jobject settings, jint reapply_options) {
+    auto *proxy = (AndroidDnsProxy *) native_ptr;
+    assert(proxy);
+    return proxy->reapply_settings(env, settings, reapply_options);
 }
 
 extern "C" JNIEXPORT jobject JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_getDefaultSettings(
@@ -90,8 +108,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_handleMessageAsync(
-        JNIEnv *env, jobject thiz, jlong native_ptr, jbyteArray message,
-        jobject info, jobject callback) {
+        JNIEnv *env, jobject thiz, jlong native_ptr, jbyteArray message, jobject info, jobject callback) {
     auto *proxy = (AndroidDnsProxy *) native_ptr;
     assert(proxy);
     proxy->handle_message_async(env, message, info, callback);
@@ -194,7 +211,7 @@ LocalRef<jobject> AndroidDnsProxy::marshal_upstream(JNIEnv *env, const UpstreamO
     }
 
     if (LocalRef fingerprint{env, env->GetObjectField(java_upstream, fp_field)}) {
-        for (auto &fp: settings.fingerprints) {
+        for (auto &fp : settings.fingerprints) {
             m_utils.collection_add(env, fingerprint.get(), m_utils.marshal_string(env, fp).get());
         }
     }
@@ -266,8 +283,7 @@ ProxySettingsOverrides AndroidDnsProxy::marshal_settings_overrides(JNIEnv *env, 
     return ret;
 }
 
-jni::LocalRef<jobject>
-AndroidDnsProxy::marshal_settings_overrides(JNIEnv *env, const ProxySettingsOverrides &x) {
+jni::LocalRef<jobject> AndroidDnsProxy::marshal_settings_overrides(JNIEnv *env, const ProxySettingsOverrides &x) {
     auto *clazz = env->FindClass(FQN_SETTINGS_OVERRIDES);
     auto *ctor = env->GetMethodID(clazz, "<init>", "()V");
 
@@ -276,8 +292,7 @@ AndroidDnsProxy::marshal_settings_overrides(JNIEnv *env, const ProxySettingsOver
     if (x.block_ech.has_value()) {
         auto *bool_clazz = env->FindClass("java/lang/Boolean");
         auto *value_of = env->GetStaticMethodID(bool_clazz, "valueOf", "(Z)Ljava/lang/Boolean;");
-        LocalRef block_ech{env, env->CallStaticObjectMethod(bool_clazz, value_of,
-                                                            jboolean(x.block_ech.value()))};
+        LocalRef block_ech{env, env->CallStaticObjectMethod(bool_clazz, value_of, jboolean(x.block_ech.value()))};
 
         auto *block_ech_field = env->GetFieldID(clazz, "blockEch", "Ljava/lang/Boolean;");
         env->SetObjectField(ret.get(), block_ech_field, block_ech.get());
@@ -312,8 +327,8 @@ ListenerSettings AndroidDnsProxy::marshal_listener(JNIEnv *env, jobject java_lis
 
     settings.persistent = env->GetBooleanField(java_listener_settings, persistent_field);
     settings.idle_timeout = std::chrono::milliseconds(env->GetLongField(java_listener_settings, idle_timeout_field));
-    settings.settings_overrides = marshal_settings_overrides(env, LocalRef{env, env->GetObjectField(
-            java_listener_settings, settings_overrides_field)}.get());
+    settings.settings_overrides = marshal_settings_overrides(
+            env, LocalRef{env, env->GetObjectField(java_listener_settings, settings_overrides_field)}.get());
 
     return settings;
 }
@@ -336,8 +351,7 @@ LocalRef<jobject> AndroidDnsProxy::marshal_listener(JNIEnv *env, const ListenerS
             java_listener, protocol_field, m_listener_protocol_enum_values.at((size_t) settings.protocol).get());
     env->SetBooleanField(java_listener, persistent_field, settings.persistent);
     env->SetLongField(java_listener, idle_timeout_field, settings.idle_timeout.count());
-    env->SetObjectField(
-            java_listener, settings_overrides_field,
+    env->SetObjectField(java_listener, settings_overrides_field,
             marshal_settings_overrides(env, settings.settings_overrides).get());
 
     return LocalRef(env, java_listener);
@@ -415,7 +429,8 @@ LocalRef<jobject> AndroidDnsProxy::marshal_outbound_proxy(JNIEnv *env, const Out
 
     auto clazz = env->FindClass(FQN_OUTBOUND_PROXY_SETTINGS);
     auto ctor = env->GetMethodID(clazz, "<init>",
-            "(L" FQN_OUTBOUND_PROXY_PROTOCOL ";Ljava/lang/String;ILjava/util/List;L" FQN_OUTBOUND_PROXY_AUTH_INFO ";Z)V");
+            "(L" FQN_OUTBOUND_PROXY_PROTOCOL ";Ljava/lang/String;ILjava/util/List;L" FQN_OUTBOUND_PROXY_AUTH_INFO
+            ";Z)V");
     return {env,
             env->NewObject(clazz, ctor, m_proxy_protocol_enum_values.at((size_t) csettings.protocol).get(),
                     address.get(), (jint) csettings.port, bootstrap.get(), auth_info.get(),
@@ -486,10 +501,12 @@ DnsProxySettings AndroidDnsProxy::marshal_settings(JNIEnv *env, jobject java_dns
     auto enable_dnssec_ok_field = env->GetFieldID(clazz, "enableDNSSECOK", "Z");
     auto enable_retr_field = env->GetFieldID(clazz, "enableRetransmissionHandling", "Z");
     auto block_ech_field = env->GetFieldID(clazz, "blockEch", "Z");
+    auto block_h3_alpn_field = env->GetFieldID(clazz, "blockH3Alpn", "Z");
     auto parallel_queries_field = env->GetFieldID(clazz, "enableParallelUpstreamQueries", "Z");
     auto fallback_on_failure_field = env->GetFieldID(clazz, "enableFallbackOnUpstreamsFailure", "Z");
     auto servfail_on_failure_field = env->GetFieldID(clazz, "enableServfailOnUpstreamsFailure", "Z");
     auto enable_http3_field = env->GetFieldID(clazz, "enableHttp3", "Z");
+    auto enable_post_quantum_cryptography_field = env->GetFieldID(clazz, "enablePostQuantumCryptography", "Z");
     auto timeout_field = env->GetFieldID(clazz, "upstreamTimeoutMs", "J");
 
     DnsProxySettings settings{};
@@ -559,10 +576,15 @@ DnsProxySettings AndroidDnsProxy::marshal_settings(JNIEnv *env, jobject java_dns
     settings.enable_dnssec_ok = env->GetBooleanField(java_dnsproxy_settings, enable_dnssec_ok_field);
     settings.enable_retransmission_handling = env->GetBooleanField(java_dnsproxy_settings, enable_retr_field);
     settings.block_ech = env->GetBooleanField(java_dnsproxy_settings, block_ech_field);
+    settings.block_h3_alpn = env->GetBooleanField(java_dnsproxy_settings, block_h3_alpn_field);
     settings.enable_parallel_upstream_queries = env->GetBooleanField(java_dnsproxy_settings, parallel_queries_field);
-    settings.enable_fallback_on_upstreams_failure = env->GetBooleanField(java_dnsproxy_settings, fallback_on_failure_field);
-    settings.enable_servfail_on_upstreams_failure = env->GetBooleanField(java_dnsproxy_settings, servfail_on_failure_field);
+    settings.enable_fallback_on_upstreams_failure =
+            env->GetBooleanField(java_dnsproxy_settings, fallback_on_failure_field);
+    settings.enable_servfail_on_upstreams_failure =
+            env->GetBooleanField(java_dnsproxy_settings, servfail_on_failure_field);
     settings.enable_http3 = env->GetBooleanField(java_dnsproxy_settings, enable_http3_field);
+    settings.enable_post_quantum_cryptography =
+            env->GetBooleanField(java_dnsproxy_settings, enable_post_quantum_cryptography_field);
     settings.upstream_timeout = Millis{env->GetLongField(java_dnsproxy_settings, timeout_field)};
 
     return settings;
@@ -591,10 +613,12 @@ LocalRef<jobject> AndroidDnsProxy::marshal_settings(JNIEnv *env, const DnsProxyS
     auto enable_dnssec_ok_field = env->GetFieldID(clazz, "enableDNSSECOK", "Z");
     auto enable_retr_field = env->GetFieldID(clazz, "enableRetransmissionHandling", "Z");
     auto block_ech_field = env->GetFieldID(clazz, "blockEch", "Z");
+    auto block_h3_alpn_field = env->GetFieldID(clazz, "blockH3Alpn", "Z");
     auto parallel_queries_field = env->GetFieldID(clazz, "enableParallelUpstreamQueries", "Z");
     auto fallback_on_failure_field = env->GetFieldID(clazz, "enableFallbackOnUpstreamsFailure", "Z");
     auto servfail_on_failure_field = env->GetFieldID(clazz, "enableServfailOnUpstreamsFailure", "Z");
     auto enable_http3_field = env->GetFieldID(clazz, "enableHttp3", "Z");
+    auto enable_post_quantum_cryptography_field = env->GetFieldID(clazz, "enablePostQuantumCryptography", "Z");
     auto timeout_field = env->GetFieldID(clazz, "upstreamTimeoutMs", "J");
 
     auto java_settings = env->NewObject(clazz, ctor);
@@ -656,10 +680,15 @@ LocalRef<jobject> AndroidDnsProxy::marshal_settings(JNIEnv *env, const DnsProxyS
     env->SetBooleanField(java_settings, enable_dnssec_ok_field, (jboolean) settings.enable_dnssec_ok);
     env->SetBooleanField(java_settings, enable_retr_field, (jboolean) settings.enable_retransmission_handling);
     env->SetBooleanField(java_settings, block_ech_field, (jboolean) settings.block_ech);
+    env->SetBooleanField(java_settings, block_h3_alpn_field, (jboolean) settings.block_h3_alpn);
     env->SetBooleanField(java_settings, parallel_queries_field, (jboolean) settings.enable_parallel_upstream_queries);
-    env->SetBooleanField(java_settings, fallback_on_failure_field, (jboolean) settings.enable_fallback_on_upstreams_failure);
-    env->SetBooleanField(java_settings, servfail_on_failure_field, (jboolean) settings.enable_servfail_on_upstreams_failure);
+    env->SetBooleanField(
+            java_settings, fallback_on_failure_field, (jboolean) settings.enable_fallback_on_upstreams_failure);
+    env->SetBooleanField(
+            java_settings, servfail_on_failure_field, (jboolean) settings.enable_servfail_on_upstreams_failure);
     env->SetBooleanField(java_settings, enable_http3_field, (jboolean) settings.enable_http3);
+    env->SetBooleanField(java_settings, enable_post_quantum_cryptography_field,
+            (jboolean) settings.enable_post_quantum_cryptography);
     env->SetLongField(java_settings, timeout_field, (jlong) settings.upstream_timeout.count());
 
     return LocalRef(env, java_settings);
@@ -687,6 +716,8 @@ LocalRef<jobject> AndroidDnsProxy::marshal_processed_event(JNIEnv *env, const Dn
     env->SetBooleanField(java_event, m_processed_event_fields.whitelist, event.whitelist);
     env->SetBooleanField(java_event, m_processed_event_fields.cache_hit, event.cache_hit);
     env->SetBooleanField(java_event, m_processed_event_fields.dnssec, event.dnssec);
+    env->SetObjectField(java_event, m_processed_event_fields.blocking_reason,
+            m_blocking_reason_values.at((size_t) event.blocking_reason).get());
 
     {
         const jsize ids_len = event.filter_list_ids.size();
@@ -761,6 +792,10 @@ DnsRequestProcessedEvent AndroidDnsProxy::marshal_processed_event(JNIEnv *env, j
             }
         });
     }
+    if (jobject jblocking_reason = env->GetObjectField(jevent, m_processed_event_fields.blocking_reason);
+            !env->IsSameObject(jblocking_reason, nullptr)) {
+        event.blocking_reason = (DnsBlockingReason) m_utils.get_enum_ordinal(env, jblocking_reason);
+    }
 
     return event;
 }
@@ -832,7 +867,8 @@ DnsProxyEvents AndroidDnsProxy::marshal_events(JNIEnv *env, jobject java_events)
     return events;
 }
 
-jni::LocalRef<jobject> AndroidDnsProxy::marshal_init_result(JNIEnv *env, const DnsProxy::DnsProxyInitResult &init_result) {
+jni::LocalRef<jobject> AndroidDnsProxy::marshal_init_result(
+        JNIEnv *env, const DnsProxy::DnsProxyInitResult &init_result) {
     auto clazz = env->FindClass(FQN_DNSPROXY_RESULT);
     auto ctor = env->GetMethodID(clazz, "<init>", "()V");
 
@@ -843,8 +879,10 @@ jni::LocalRef<jobject> AndroidDnsProxy::marshal_init_result(JNIEnv *env, const D
     auto java_params = env->NewObject(clazz, ctor);
 
     if (init_result.second) {
-        env->SetObjectField(java_params, description_field, m_utils.marshal_string(env, init_result.second->str()).get());
-        env->SetObjectField(java_params, code_field, m_dnsproxy_init_result.at((size_t) init_result.second->value()).get());
+        env->SetObjectField(
+                java_params, description_field, m_utils.marshal_string(env, init_result.second->str()).get());
+        env->SetObjectField(
+                java_params, code_field, m_dnsproxy_init_result.at((size_t) init_result.second->value()).get());
     }
 
     env->SetBooleanField(java_params, success_field, (jboolean) init_result.first);
@@ -870,6 +908,16 @@ void AndroidDnsProxy::deinit(JNIEnv *env) {
     m_actual_proxy.deinit();
 }
 
+jobject AndroidDnsProxy::reapply_settings(JNIEnv *env, jobject settings, jint reapply_options) {
+    auto check = m_jni_initialized.load();
+    assert(check);
+
+    DnsProxySettings cpp_settings = marshal_settings(env, settings);
+    auto result = m_actual_proxy.reapply_settings(std::move(cpp_settings), DnsProxy::ReapplyOptions(reapply_options));
+
+    return marshal_init_result(env, result).release();
+}
+
 jbyteArray AndroidDnsProxy::handle_message(JNIEnv *env, jbyteArray message, jobject info) {
     auto elements = env->GetByteArrayElements(message, nullptr); // May copy, must call ReleaseByteArrayElements
     auto size = env->GetArrayLength(message);
@@ -888,7 +936,8 @@ jbyteArray AndroidDnsProxy::handle_message(JNIEnv *env, jbyteArray message, jobj
 void AndroidDnsProxy::handle_message_async(JNIEnv *env, jbyteArray message, jobject info, jobject callback) {
     JavaVM *vm = ag::jni::get_vm(env);
     coro::run_detached([](AndroidDnsProxy *proxy, JavaVM *vm, ag::jni::GlobalRef<jbyteArray> message,
-                          ag::jni::GlobalRef<jobject> info, ag::jni::GlobalRef<jobject> callback) -> coro::Task<void> {
+                               ag::jni::GlobalRef<jobject> info,
+                               ag::jni::GlobalRef<jobject> callback) -> coro::Task<void> {
         std::vector<uint8_t> result;
         jbyte *msg_data;
         jsize msg_size;
@@ -899,7 +948,8 @@ void AndroidDnsProxy::handle_message_async(JNIEnv *env, jbyteArray message, jobj
             msg_size = env->GetArrayLength(message.get());
             cinfo = proxy->marshal_message_info(env.get(), info.get());
         }
-        result = co_await proxy->m_actual_proxy.handle_message({(uint8_t *) msg_data, (size_t) msg_size}, opt_as_ptr(cinfo));
+        result = co_await proxy->m_actual_proxy.handle_message(
+                {(uint8_t *) msg_data, (size_t) msg_size}, opt_as_ptr(cinfo));
         // Switched threads during `handle_message`.
         {
             ag::jni::ScopedJniEnv env(vm, 16);
@@ -923,8 +973,8 @@ jobject AndroidDnsProxy::get_settings(JNIEnv *env) {
     return marshal_settings(env, m_actual_proxy.get_settings()).release();
 }
 
-jstring AndroidDnsProxy::test_upstream(
-        JNIEnv *env, jobject upstream_settings, jlong timeout_ms, jboolean ipv6, jobject events_adapter, jboolean offline) {
+jstring AndroidDnsProxy::test_upstream(JNIEnv *env, jobject upstream_settings, jlong timeout_ms, jboolean ipv6,
+        jobject events_adapter, jboolean offline) {
     m_events = GlobalRef(get_vm(env), events_adapter);
     auto err = ag::dns::test_upstream(marshal_upstream(env, upstream_settings), Millis{timeout_ms}, ipv6,
             marshal_events(env, events_adapter).on_certificate_verification, offline);
@@ -956,6 +1006,7 @@ AndroidDnsProxy::AndroidDnsProxy(JavaVM *vm)
     m_processed_event_fields.filter_list_ids = env->GetFieldID(c, "filterListIds", "[I");
     m_processed_event_fields.cache_hit = env->GetFieldID(c, "cacheHit", "Z");
     m_processed_event_fields.dnssec = env->GetFieldID(c, "dnssec", "Z");
+    m_processed_event_fields.blocking_reason = env->GetFieldID(c, "blockingReason", "L" FQN_BLOCKING_REASON ";");
 
     c = (m_jclasses.cert_verify_event = GlobalRef(vm, env->FindClass(FQN_CERT_VERIFY_EVENT))).get();
     m_cert_verify_event_methods.ctor = env->GetMethodID(c, "<init>", "()V");
@@ -963,10 +1014,10 @@ AndroidDnsProxy::AndroidDnsProxy(JavaVM *vm)
     m_cert_verify_event_fields.chain = env->GetFieldID(c, "chain", "Ljava/util/List;");
 
     c = (m_jclasses.events_interface = GlobalRef(vm, env->FindClass(FQN_DNSPROXY_EVENTS))).get();
-    m_events_interface_methods.on_request_processed
-            = env->GetMethodID(c, "onRequestProcessed", "(L" FQN_REQ_PROC_EVENT ";)V");
-    m_events_interface_methods.on_certificate_verification
-            = env->GetMethodID(c, "onCertificateVerification", "(L" FQN_CERT_VERIFY_EVENT ";)Ljava/lang/String;");
+    m_events_interface_methods.on_request_processed =
+            env->GetMethodID(c, "onRequestProcessed", "(L" FQN_REQ_PROC_EVENT ";)V");
+    m_events_interface_methods.on_certificate_verification =
+            env->GetMethodID(c, "onCertificateVerification", "(L" FQN_CERT_VERIFY_EVENT ";)Ljava/lang/String;");
 
     c = (m_jclasses.filtering_log_action = GlobalRef(vm, env->FindClass(FQN_FILTERING_LOG_ACTION))).get();
     m_filtering_log_action_methods.ctor = env->GetMethodID(c, "<init>", "(Ljava/util/List;IIZ)V");
@@ -978,6 +1029,7 @@ AndroidDnsProxy::AndroidDnsProxy(JavaVM *vm)
     m_listener_protocol_enum_values = m_utils.get_enum_values(env.get(), FQN_LISTENER_PROTOCOL);
     m_proxy_protocol_enum_values = m_utils.get_enum_values(env.get(), FQN_OUTBOUND_PROXY_PROTOCOL);
     m_blocking_mode_values = m_utils.get_enum_values(env.get(), FQN_BLOCKING_MODE);
+    m_blocking_reason_values = m_utils.get_enum_values(env.get(), FQN_BLOCKING_REASON);
     m_dnsproxy_init_result = m_utils.get_enum_values(env.get(), FQN_DNSPROXY_ERROR_CODE);
 
     c = (m_jclasses.message_info = GlobalRef(vm, env->FindClass(FQN_DNS_MESSAGE_INFO))).get();
@@ -989,25 +1041,24 @@ AndroidDnsProxy::AndroidDnsProxy(JavaVM *vm)
     m_jni_initialized.store(true);
 }
 
-jni::LocalRef<jobject> AndroidDnsProxy::marshal_filtering_log_action(JNIEnv *env, const DnsFilter::FilteringLogAction &action) {
+jni::LocalRef<jobject> AndroidDnsProxy::marshal_filtering_log_action(
+        JNIEnv *env, const DnsFilter::FilteringLogAction &action) {
     jclass list_clazz = env->FindClass("java/util/ArrayList");
     jmethodID list_ctor = env->GetMethodID(list_clazz, "<init>", "(I)V");
     LocalRef<jobject> templates = {env, env->NewObject(list_clazz, list_ctor, (jint) action.templates.size())};
-    for (auto &tmplt: action.templates) {
+    for (auto &tmplt : action.templates) {
         m_utils.collection_add(env, templates.get(), marshal_rule_template(env, tmplt).get());
     }
-    LocalRef<jobject> jaction{env, env->NewObject(m_jclasses.filtering_log_action.get(),
-                                                  m_filtering_log_action_methods.ctor,
-                                                  templates.get(),
-                                                  (jint) action.allowed_options,
-                                                  (jint) action.required_options,
-                                                  (jboolean) action.blocking)};
+    LocalRef<jobject> jaction{env,
+            env->NewObject(m_jclasses.filtering_log_action.get(), m_filtering_log_action_methods.ctor, templates.get(),
+                    (jint) action.allowed_options, (jint) action.required_options, (jboolean) action.blocking)};
     return jaction;
 }
 
 jni::LocalRef<jobject> AndroidDnsProxy::marshal_rule_template(JNIEnv *env, const DnsFilter::RuleTemplate &tmplt) {
-    LocalRef<jobject> jtmplt{env, env->NewObject(m_jclasses.rule_template.get(), m_rule_template_methods.ctor,
-                                                 m_utils.marshal_string(env, tmplt.text).get())};
+    LocalRef<jobject> jtmplt{env,
+            env->NewObject(m_jclasses.rule_template.get(), m_rule_template_methods.ctor,
+                    m_utils.marshal_string(env, tmplt.text).get())};
     return jtmplt;
 }
 
@@ -1050,27 +1101,20 @@ extern "C" JNIEXPORT jstring JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_ver
     return env->NewStringUTF(DnsProxy::version()); // Assume version is already valid UTF-8/CESU-8
 }
 
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_adguard_dnslibs_proxy_DnsProxy_filteringLogActionFromEvent(JNIEnv *env, jobject thiz, jlong native_ptr, jobject event) {
+extern "C" JNIEXPORT jobject JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_filteringLogActionFromEvent(
+        JNIEnv *env, jobject thiz, jlong native_ptr, jobject event) {
     auto *proxy = (AndroidDnsProxy *) native_ptr;
     return proxy->filtering_log_action_from_event(env, event);
 }
 
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_adguard_dnslibs_proxy_DnsProxy_generateRuleFromTemplate(JNIEnv *env, jobject thiz, jlong native_ptr,
-                                                                 jobject tmplt,
-                                                                 jobject event,
-                                                                 jint options) {
+extern "C" JNIEXPORT jstring JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_generateRuleFromTemplate(
+        JNIEnv *env, jobject thiz, jlong native_ptr, jobject tmplt, jobject event, jint options) {
     auto *proxy = (AndroidDnsProxy *) native_ptr;
     return proxy->generate_rule(env, tmplt, event, options);
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_dnslibs_proxy_DnsProxy_setLoggingCallback(JNIEnv *env, jclass clazz,
-                                                           jobject callback) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_setLoggingCallback(
+        JNIEnv *env, jclass clazz, jobject callback) {
     JavaVM *vm;
     if (int ret = env->GetJavaVM(&vm); ret != 0) {
         AG_ANDROID_LOG(ANDROID_LOG_ERROR, "DnsProxy", "%s: GetJavaVM: %d", __func__, ret);
@@ -1081,19 +1125,14 @@ Java_com_adguard_dnslibs_proxy_DnsProxy_setLoggingCallback(JNIEnv *env, jclass c
     GlobalRef logObject{vm, callback};
     jmethodID logMethod = env->GetMethodID(logClass.get(), "log", "(ILjava/lang/String;)V");
 
-    Logger::set_callback(
-            [vm, obj = std::move(logObject), logMethod](LogLevel level,
-                                                        std::string_view message) mutable {
-                ScopedJniEnv env(vm, 8);
-                env->CallVoidMethod(obj.get(), logMethod, (jint) level,
-                                    JniUtils::marshal_string(env.get(), message).get());
-            });
+    Logger::set_callback([vm, obj = std::move(logObject), logMethod](LogLevel level, std::string_view message) mutable {
+        ScopedJniEnv env(vm, 8);
+        env->CallVoidMethod(obj.get(), logMethod, (jint) level, JniUtils::marshal_string(env.get(), message).get());
+    });
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_adguard_dnslibs_proxy_DnsProxy_log(JNIEnv *env, jclass clazz, jint level,
-                                            jstring message) {
+extern "C" JNIEXPORT void JNICALL Java_com_adguard_dnslibs_proxy_DnsProxy_log(
+        JNIEnv *env, jclass clazz, jint level, jstring message) {
     static ag::Logger logger{"JavaAdapter"};
     const char *message_utf_chars = env->GetStringUTFChars(message, nullptr);
     logger.log((ag::LogLevel) level, "{}", message_utf_chars);

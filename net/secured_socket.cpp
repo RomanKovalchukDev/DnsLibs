@@ -13,15 +13,16 @@ enum SecuredSocket::State : int {
 SecuredSocket::SecuredSocket(SocketFactory::SocketPtr underlying_socket, const CertificateVerifier *cert_verifier,
         SocketFactory::SecureSocketParameters secure_parameters)
         : Socket(__func__,
-                {
-                        .proto = underlying_socket->get_protocol(),
-                },
-                {})
+                  {
+                          .proto = underlying_socket->get_protocol(),
+                  },
+                  {})
         , m_state(SS_IDLE)
         , m_underlying_socket(std::move(underlying_socket))
         , m_codec(cert_verifier, secure_parameters.session_cache, std::move(secure_parameters.fingerprints))
         , m_sni(std::move(secure_parameters.server_name))
         , m_alpn(std::move(secure_parameters.alpn))
+        , m_enable_pq(secure_parameters.enable_post_quantum)
         , m_log(__func__) {
     m_shutdown_guard = std::make_shared<bool>(true);
 }
@@ -77,7 +78,7 @@ void SecuredSocket::on_connected(void *arg) {
     auto *self = (SecuredSocket *) arg;
     assert(self->m_state == SS_CONNECTING_SOCKET);
 
-    if (auto err = self->m_codec.connect(self->m_sni, self->m_alpn)) {
+    if (auto err = self->m_codec.connect(self->m_sni, self->m_alpn, self->m_enable_pq)) {
         if (Callbacks cbx = self->get_callbacks(); cbx.on_close != nullptr) {
             cbx.on_close(cbx.arg, make_error(SocketError::AE_TLS_ERROR, err));
             return;

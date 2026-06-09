@@ -12,6 +12,7 @@ using static Adguard.Dns.AGDnsApi;
 namespace Adguard.Dns.DnsProxyServer
 {
     // ReSharper disable InconsistentNaming
+    /// <inheritdoc cref="IDnsProxyServer" />
     public class DnsProxyServer : IDnsProxyServer, IDisposable
     {
         private IntPtr m_pCallbackConfigurationC;
@@ -19,13 +20,14 @@ namespace Adguard.Dns.DnsProxyServer
 
         // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
         // We shouldn't make this variable local (within the DnsProxyServer ctor) to protect it from the GC
-        private AGDnsApi.AGDnsProxyServerCallbacks m_callbackConfigurationC;
+        private AGDnsProxyServerCallbacks m_callbackConfigurationC;
         private bool m_IsStarted;
         private readonly object m_SyncRoot = new object();
         private readonly DnsProxySettings m_DnsProxySettings;
         private readonly IDnsProxyServerCallbackConfiguration m_CallbackConfiguration;
 
-        private uint m_DnsMessageHandlerNextId = 0;
+        private uint m_DnsMessageHandlerNextId;
+        // ReSharper disable once CollectionNeverQueried.Local
         private readonly Dictionary<uint, ag_handle_message_async_cb> m_DnsMessageHandlers =
 	        new Dictionary<uint, ag_handle_message_async_cb>();
 
@@ -44,7 +46,7 @@ namespace Adguard.Dns.DnsProxyServer
             lock (m_SyncRoot)
             {
                 Logger.Info("Creating the DnsProxyServer");
-                AGDnsApi.ValidateApi();
+                ValidateApi();
                 m_DnsProxySettings = dnsProxySettings;
                 m_CallbackConfiguration = callbackConfiguration;
             }
@@ -74,27 +76,28 @@ namespace Adguard.Dns.DnsProxyServer
                 IntPtr pOutResult = IntPtr.Zero;
                 try
                 {
-                    AGDnsApi.ag_dnsproxy_settings dnsProxySettingsC =
+                    ag_dnsproxy_settings dnsProxySettingsC =
                         DnsApiConverter.ToNativeObject(m_DnsProxySettings, allocatedPointers);
                     m_callbackConfigurationC = DnsApiConverter.ToNativeObject(m_CallbackConfiguration, this);
 
                     IntPtr pDnsProxySettingsC = MarshalUtils.StructureToPtr(dnsProxySettingsC, allocatedPointers);
                     m_pCallbackConfigurationC = MarshalUtils.StructureToPtr(m_callbackConfigurationC);
 
-                    pOutResult = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(IntPtr)));
-                    ppOutMessage = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(IntPtr)));
-                    m_pProxyServer = AGDnsApi.ag_dnsproxy_init(
+                    pOutResult = Marshal.AllocHGlobal(IntPtr.Size);
+                    ppOutMessage = Marshal.AllocHGlobal(IntPtr.Size);
+                    Marshal.WriteIntPtr(ppOutMessage, IntPtr.Zero);
+                    m_pProxyServer = ag_dnsproxy_init(
 	                    pDnsProxySettingsC,
 	                    m_pCallbackConfigurationC,
 	                    pOutResult,
 	                    ppOutMessage);
-                    AGDnsApi.ag_dnsproxy_init_result outResultEnum = AGDnsApi.ag_dnsproxy_init_result.AGDPIR_OK;
+                    ag_dnsproxy_init_result outResultEnum = ag_dnsproxy_init_result.AGDPIR_OK;
                     if (m_pProxyServer == IntPtr.Zero)
                     {
                         long? outResult = MarshalUtils.ReadNullableInt(pOutResult);
                         if (outResult.HasValue)
                         {
-                            outResultEnum = (AGDnsApi.ag_dnsproxy_init_result)outResult.Value;
+                            outResultEnum = (ag_dnsproxy_init_result)outResult.Value;
                         }
 
                         pOutMessage = MarshalUtils.SafeReadIntPtr(ppOutMessage);
@@ -120,7 +123,7 @@ namespace Adguard.Dns.DnsProxyServer
                 finally
                 {
                     MarshalUtils.SafeFreeHGlobal(allocatedPointers);
-					AGDnsApi.ag_str_free(pOutMessage);
+					ag_str_free(pOutMessage);
                     MarshalUtils.SafeFreeHGlobal(ppOutMessage);
                     MarshalUtils.SafeFreeHGlobal(pOutResult);
                 }
@@ -146,7 +149,7 @@ namespace Adguard.Dns.DnsProxyServer
                         return;
                     }
 
-					AGDnsApi.ag_dnsproxy_deinit( 
+					ag_dnsproxy_deinit( 
 						m_pProxyServer);
                     m_IsStarted = false;
                     Logger.Info("Finished stopping the DnsProxyServer");
@@ -180,7 +183,7 @@ namespace Adguard.Dns.DnsProxyServer
                     return null;
                 }
 
-                IntPtr pSettings = AGDnsApi.ag_dnsproxy_get_settings( 
+                IntPtr pSettings = ag_dnsproxy_get_settings( 
 	                m_pProxyServer);
                 DnsProxySettings currentDnsProxySettings =
                     GetDnsProxySettings(pSettings);
@@ -198,7 +201,7 @@ namespace Adguard.Dns.DnsProxyServer
         public static DnsProxySettings GetDefaultDnsProxySettings()
         {
             Logger.Info("Get default DnsProxyServer settings");
-            IntPtr pSettings = AGDnsApi.ag_dnsproxy_settings_get_default();
+            IntPtr pSettings = ag_dnsproxy_settings_get_default();
             DnsProxySettings defaultDnsProxySettings =
                 GetDnsProxySettings(pSettings);
             return defaultDnsProxySettings;
@@ -222,7 +225,7 @@ namespace Adguard.Dns.DnsProxyServer
             }
 
             DnsProxySettings currentDnsProxySettings =
-                MarshalUtils.PtrToClass<DnsProxySettings, AGDnsApi.ag_dnsproxy_settings>(
+                MarshalUtils.PtrToClass<DnsProxySettings, ag_dnsproxy_settings>(
                     pCurrentDnsProxySettings,
                     DnsApiConverter.FromNativeObject);
             Logger.Info("Finished getting the DNS proxy settings");
@@ -275,7 +278,7 @@ namespace Adguard.Dns.DnsProxyServer
 			// or there would be a memory leak for each request.
 			// So, we instantiate each delegate and save it until manual execution.
 			uint handlerId = m_DnsMessageHandlerNextId++;
-	        ag_handle_message_async_cb nativeMessageHandler = (IntPtr pBuffer) =>
+	        ag_handle_message_async_cb nativeMessageHandler = pBuffer =>
 			{
 				byte[] bufferBytes = MarshalUtils.AgBufferPtrToBytes(pBuffer);
 				handler(bufferBytes);
@@ -299,10 +302,81 @@ namespace Adguard.Dns.DnsProxyServer
 				pNativeDnsMessageInfo,
 				nativeMessageHandler);
         }
+        
+        /// <summary>
+        ///  Reapply DNS proxy settings with selective reloading
+        ///
+        /// This function allows updating DNS proxy configuration without full reinitialization.
+        /// You can selectively reload different parts of the configuration using ag_dnsproxy_reapply_options flags.
+        /// </summary>
+        /// <param name="dnsProxySettings">dnsProxySettings</param>
+        /// <param name="options">bitwise OR combination of <see cref="ag_dnsproxy_reapply_options"/> flags</param>
+        public bool ReapplySettings(DnsProxySettings dnsProxySettings, ag_dnsproxy_reapply_options options)
+        {
+            Logger.InfoBeforeCall();
+            lock (m_SyncRoot)
+            {
+                if (m_pProxyServer == IntPtr.Zero)
+                {
+                    Logger.Info("Cannot reapply settings as the inner proxy server is not specified yet");
+                    return false;
+                }
+            
+                Queue<IntPtr> allocatedPointers = new Queue<IntPtr>();
+                IntPtr pOutResult = IntPtr.Zero;
+                IntPtr ppOutMessage = IntPtr.Zero;
+                IntPtr pOutMessage = IntPtr.Zero;
+                try
+                {
+                    ag_dnsproxy_settings dnsProxySettingsC =
+                        DnsApiConverter.ToNativeObject(dnsProxySettings, allocatedPointers);
+                    IntPtr pDnsProxySettingsC = MarshalUtils.StructureToPtr(dnsProxySettingsC, allocatedPointers);
+                    pOutResult = Marshal.AllocHGlobal(IntPtr.Size);
+                    ppOutMessage = Marshal.AllocHGlobal(IntPtr.Size);
+                    Marshal.WriteIntPtr(ppOutMessage, IntPtr.Zero);
+                    bool result = ag_dnsproxy_reapply_settings(
+                        m_pProxyServer,
+                        pDnsProxySettingsC,
+                        options,
+                        pOutResult,
+                        ppOutMessage);
+                    ag_dnsproxy_init_result outResultEnum = ag_dnsproxy_init_result.AGDPIR_OK;
+                    long? outResult = MarshalUtils.ReadNullableInt(pOutResult);
+                    if (outResult.HasValue)
+                    {
+                        outResultEnum = (ag_dnsproxy_init_result)outResult.Value;
+                    }
+
+                    pOutMessage = MarshalUtils.SafeReadIntPtr(ppOutMessage);
+                    string outMessage = MarshalUtils.PtrToString(pOutMessage);
+                    Logger.Info("Reapplying settings completed with the result {0} ({1}, {2})",
+                        result,
+                        outResultEnum,
+                        outMessage);
+
+                    if (outResultEnum == ag_dnsproxy_init_result.AGDPIR_OK)
+                    {
+                        return result;
+                    }
+                    
+                    string errorMessage =
+                        $"Failed to reapply settings with the result {outResultEnum} and message {outMessage}";
+                    throw new DnsProxyInitializationException(errorMessage, outResultEnum);
+                }
+                finally
+                {
+                    MarshalUtils.SafeFreeHGlobal(allocatedPointers);
+                    ag_str_free(pOutMessage);
+                    MarshalUtils.SafeFreeHGlobal(pOutResult);
+                    MarshalUtils.SafeFreeHGlobal(ppOutMessage);
+                }
+            }
+        }
 
 		#endregion
 
-		public void Dispose()
+        /// <inheritdoc />
+        public void Dispose()
         {
             lock (m_SyncRoot)
             {

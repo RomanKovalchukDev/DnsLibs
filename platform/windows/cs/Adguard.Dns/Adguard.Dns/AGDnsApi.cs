@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using AdGuard.Utils.Base.Interop;
 
@@ -22,7 +22,7 @@ namespace Adguard.Dns
 		/// <summary>
 		/// The current API version hash with which the ProxyServer was tested
 		/// </summary>
-		private const string API_VERSION_HASH = "bacb1e8b96a22517f6951a9a7a7d11a452549e460d34936144b7987e06933f05";
+        private const string API_VERSION_HASH = "318280e660e933360e2bdf95f263a87341e68f83ae2006124f180879c23cb64c";
 
         #endregion
 
@@ -130,6 +130,52 @@ namespace Adguard.Dns
 		public delegate void
 			ag_handle_message_async_cb(IntPtr pEvent);
 
+		/// <summary>
+		/// DNS blocking reason
+		/// </summary>
+		public enum ag_dns_blocking_reason
+		{
+			/// <summary>
+			/// Not blocked
+			/// </summary>
+			AGDBR_NONE,
+
+			/// <summary>
+			/// Mozilla DoH detection
+			/// </summary>
+			AGDBR_MOZILLA_DOH_DETECTION,
+
+			/// <summary>
+			/// DDR blocking
+			/// </summary>
+			AGDBR_DDR,
+
+			/// <summary>
+			/// IPv6 blocking
+			/// </summary>
+			AGDBR_IPV6,
+
+			/// <summary>
+			/// Query matched by rule
+			/// </summary>
+			AGDBR_QUERY_MATCHED_BY_RULE,
+
+			/// <summary>
+			/// CNAME matched by rule
+			/// </summary>
+			AGDBR_CNAME_MATCHED_BY_RULE,
+
+			/// <summary>
+			/// IP matched by rule
+			/// </summary>
+			AGDBR_IP_MATCHED_BY_RULE,
+
+			/// <summary>
+			/// HTTPS matched by rule
+			/// </summary>
+			AGDBR_HTTPS_MATCHED_BY_RULE,
+		}
+
 		[Flags]
         public enum ag_rule_generation_options : uint
         {
@@ -169,6 +215,27 @@ namespace Adguard.Dns
 		internal static extern void ag_dnsproxy_deinit(IntPtr proxy);
 
 		/// <summary>
+		/// Reapply DNS proxy settings with selective reloading
+		/// This function allows updating DNS proxy configuration without full reinitialization.
+		/// You can selectively reload different parts of the configuration using
+		/// <see cref="ag_dnsproxy_reapply_options"/> flags.
+		/// </summary>
+		/// <param name="pDnsProxyServer">Pointer to the DNS proxy instance</param>
+		/// <param name="pDnsProxySettings">Pointer to the new <see cref="ag_dnsproxy_settings"/> object</param>
+		/// <param name="options">bitwise OR combination of <see cref="ag_dnsproxy_reapply_options"/> flags</param>
+		/// <param name="pOutResult">Pointer to the out result (<seealso cref="ag_dnsproxy_init_result"/>)</param>
+		/// <param name="ppOutMessage">Pointer to the out message</param>
+		/// <returns>True if settings were successfully reapplied, false otherwise</returns>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool ag_dnsproxy_reapply_settings(
+			IntPtr pDnsProxyServer,
+			IntPtr pDnsProxySettings,
+			ag_dnsproxy_reapply_options options,
+			IntPtr pOutResult,
+			IntPtr ppOutMessage);
+
+		/// <summary>
 		/// Process a DNS message and return the response.
 		/// </summary>
 		/// <param name="pDnsProxyServer">Proxy server </param>
@@ -177,8 +244,10 @@ namespace Adguard.Dns
 		/// <returns>The DNS response in wire format</returns>
 		/// <remarks> The caller is responsible for freeing both buffers with `ag_buffer_free()`</remarks>
 		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
-		internal static extern MarshalUtils.ag_buffer ag_dnsproxy_handle_message(IntPtr pDnsProxyServer,
-			MarshalUtils.ag_buffer message, IntPtr info);
+		internal static extern MarshalUtils.ag_buffer ag_dnsproxy_handle_message(
+			IntPtr pDnsProxyServer,
+			MarshalUtils.ag_buffer message,
+			IntPtr info);
 
 		/// <summary>
 		/// Process a DNS message and call `handler` on an unspecified thread with the response.
@@ -189,7 +258,8 @@ namespace Adguard.Dns
 		/// <param name="handler">Callback function for asynchronous message processing.</param>
 		/// <remarks> The caller is responsible for freeing  message buffer, but you shouldn't free buffer that will be passed to handler</remarks>
 		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
-		internal static extern void ag_dnsproxy_handle_message_async(IntPtr pDnsProxyServer,
+		internal static extern void ag_dnsproxy_handle_message_async(
+			IntPtr pDnsProxyServer,
 			MarshalUtils.ag_buffer message,
 			IntPtr info, ag_handle_message_async_cb handler);
 
@@ -372,6 +442,85 @@ namespace Adguard.Dns
 			string template,
 			IntPtr pEvent,
 			ag_rule_generation_options options);
+		
+		#endregion
+
+		#region DNS SDK sample app
+
+		/// <summary>
+		/// Return the string representation of the GUID of the "preferred adapter":
+		/// the network interface whose DNS settings Windows considers first
+		/// when deciding where to send a DNS query.
+		/// </summary>
+		/// <returns>A pointer to a null-terminated string which has to be freed
+		/// with <see cref="ag_str_free"/> on success, <see cref="IntPtr.Zero"/> on error</returns>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		internal static extern IntPtr ag_dns_get_preferred_adapter_guid();
+
+		/// <summary>
+		/// Modify the DNS settings for a network interface.
+		/// Equivalent to specifying the preferred/alternative DNS server in IPv4/IPv6 properties
+		/// in the interface properties GUI.
+		/// An empty string is equivalent to selecting "Obtain DNS server address automatically".
+		/// </summary>
+		/// <param name="pDnsList">Pointer to a null-terminated comma-separated list of nameserver addresses</param>
+		/// <param name="pIfGuid">Pointer to a null-terminated interface GUID string</param>
+		/// <param name="ipv6"><c>true</c> to modify the IPv6 properties, <c>false</c> for IPv4</param>
+		/// <returns><c>0</c> on success or a non-zero error code defined in Winerror.h</returns>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		internal static extern uint ag_dns_set_if_nameserver(
+			IntPtr pDnsList,
+			IntPtr pIfGuid,
+			[MarshalAs(UnmanagedType.I1)] bool ipv6);
+
+		/// <summary>
+		/// Get the current value of the NameServer property of an interface.
+		/// Returns <see cref="IntPtr.Zero"/> on any error,
+		/// including if the property does not exist or isn't a null-terminated string.
+		/// </summary>
+		/// <param name="pIfGuid">Pointer to a null-terminated interface GUID string</param>
+		/// <param name="ipv6"><c>true</c> to get the IPv6 property, <c>false</c> for IPv4</param>
+		/// <returns>A pointer to a null-terminated string which has to be freed
+		/// with <see cref="ag_str_free"/> on success, <see cref="IntPtr.Zero"/> on error</returns>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		internal static extern IntPtr ag_dns_get_if_nameserver(
+			IntPtr pIfGuid,
+			[MarshalAs(UnmanagedType.I1)] bool ipv6);
+
+		/// <summary>
+		/// Create a new WFP firewall.
+		/// Firewall restrictions will remain active until <see cref="ag_dns_wfpfirewall_deinit"/> is called
+		/// on the returned pointer.
+		/// </summary>
+		/// <param name="pName">Pointer to a null-terminated wide character string
+		/// which shall be included in WFP entities names</param>
+		/// <param name="excludePid">ID of the process to exclude from all restrictions.
+		/// If <c>0</c>, exclude the current process</param>
+		/// <returns>Pointer to the WFP firewall instance</returns>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		internal static extern IntPtr ag_dns_wfpfirewall_init(IntPtr pName, uint excludePid);
+
+		/// <summary>
+		/// Block DNS traffic to/from all addresses except <paramref name="pAllowedV4"/>
+		/// and <paramref name="pAllowedV6"/>.
+		/// </summary>
+		/// <param name="pFw">Pointer returned by <see cref="ag_dns_wfpfirewall_init"/></param>
+		/// <param name="pAllowedV4">Pointer to a null-terminated comma-separated list
+		/// of IPv4 prefixes in CIDR notation</param>
+		/// <param name="pAllowedV6">Pointer to a null-terminated comma-separated list
+		/// of IPv6 prefixes in CIDR notation</param>
+		/// <returns><see cref="IntPtr.Zero"/> on success, a pointer to a null-terminated error description
+		/// which has to be freed with <see cref="ag_str_free"/> on error</returns>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		internal static extern IntPtr ag_dns_wfpfirewall_restrict_dns_to(IntPtr pFw, IntPtr pAllowedV4, IntPtr pAllowedV6);
+
+		/// <summary>
+		/// Revert all restrictions and destroy the firewall.
+		/// </summary>
+		/// <param name="pFw">Pointer returned by <see cref="ag_dns_wfpfirewall_init"/></param>
+		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+		internal static extern void ag_dns_wfpfirewall_deinit(IntPtr pFw);
+		
 
         #endregion
 
@@ -457,6 +606,22 @@ namespace Adguard.Dns
             [MarshalAs(UnmanagedType.Struct)]
             [NativeName("settings_overrides")]
             internal ag_proxy_settings_overrides settings_overrides;
+        }
+		
+        /// <summary>
+        ///  Options for reapplying DNS proxy settings.
+        /// These flags can be combined using bitwise OR to control which parts of the configuration
+        /// should be reloaded without full reinitialization.
+        /// </summary>
+        [Flags]
+        public enum ag_dnsproxy_reapply_options
+        {
+	        /** No changes, no-op */
+	        AGDPRO_NONE     = 0,
+	        /** Reload all DNS settings except listeners and filter_params */
+	        AGDPRO_SETTINGS = 1 << 0,
+	        /** Reload filter parameters (filter_params) */
+	        AGDPRO_FILTERS  = 1 << 1,
         }
 
         public enum ag_outbound_proxy_protocol
@@ -779,6 +944,13 @@ namespace Adguard.Dns
             internal bool BlockEch;
 
             /// <summary>
+            /// If enabled, remove h3 from ALPN parameter from responses.
+            /// </summary>
+            [MarshalAs(UnmanagedType.I1)]
+            [NativeName("block_h3_alpn")]
+            internal bool BlockH3Alpn;
+
+            /// <summary>
             /// If true, all upstreams are queried in parallel, and the first response is returned.
             /// </summary>
             [MarshalAs(UnmanagedType.I1)]
@@ -809,6 +981,13 @@ namespace Adguard.Dns
             [MarshalAs(UnmanagedType.I1)]
             [NativeName("enable_http3")]
             internal bool EnableHttp3;
+
+            /// <summary>
+            /// Enable post-quantum cryptography.
+            /// </summary>
+            [MarshalAs(UnmanagedType.I1)]
+            [NativeName("enable_post_quantum_cryptography")]
+            internal bool EnablePostQuantumCryptography;
         }
 
         /// <summary>
@@ -1005,6 +1184,13 @@ namespace Adguard.Dns
             [MarshalAs(UnmanagedType.I1)]
             [NativeName("dnssec")]
             internal bool DNSSEC;
+
+            /// <summary>
+            /// DNS blocking reason
+            /// </summary>
+            [MarshalAs(UnmanagedType.I4)]
+            [NativeName("blocking_reason")]
+            internal ag_dns_blocking_reason BlockingReason;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
@@ -1253,6 +1439,12 @@ namespace Adguard.Dns
 		/// <returns>Pointer to the API version hash</returns>
 		[DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
 		internal static extern IntPtr ag_dnsproxy_version();
+
+        /// <summary>
+        /// Causes the current process to crash.
+        /// </summary>
+        [DllImport(DnsLibName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void ag_dnsproxy_crash();
 
 		/// <summary>
 		/// Free a string, specified by a passed <see cref="pStr"/>

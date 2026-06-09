@@ -55,6 +55,7 @@ private:
         jfieldID error;
         jfieldID cache_hit;
         jfieldID dnssec;
+        jfieldID blocking_reason;
     } m_processed_event_fields{};
 
     struct {
@@ -93,6 +94,7 @@ private:
     std::vector<jni::GlobalRef<jobject>> m_listener_protocol_enum_values;
     std::vector<jni::GlobalRef<jobject>> m_proxy_protocol_enum_values;
     std::vector<jni::GlobalRef<jobject>> m_blocking_mode_values;
+    std::vector<jni::GlobalRef<jobject>> m_blocking_reason_values;
     std::vector<jni::GlobalRef<jobject>> m_dnsproxy_init_result;
 
     /**
@@ -178,7 +180,8 @@ private:
     /**
      * Marshal a "Certificate verification" event from C++ to Java.
      */
-    jni::LocalRef<jobject> marshal_certificate_verification_event(JNIEnv *env, const CertificateVerificationEvent &event);
+    jni::LocalRef<jobject> marshal_certificate_verification_event(
+            JNIEnv *env, const CertificateVerificationEvent &event);
 
     /**
      * Marshal Java events interface to C++ dnsproxy_events struct.
@@ -211,7 +214,6 @@ private:
     std::optional<DnsMessageInfo> marshal_message_info(JNIEnv *env, jobject jinfo);
 
 public:
-
     /**
      * Initializes global refs.
      */
@@ -232,6 +234,14 @@ public:
     void deinit(JNIEnv *env);
 
     /**
+     * Reapply DNS proxy settings with selective reloading.
+     * @param settings New proxy settings from Java.
+     * @param reapply_options Bitwise OR combination of RO_* flags from Java.
+     * @return Init result, marshalled to Java.
+     */
+    jobject reapply_settings(JNIEnv *env, jobject settings, jint reapply_options);
+
+    /**
      * Process a DNS message.
      * @param message The DNS message, in wire format.
      * @param info Additional parameters, see `com.adguard.dnslibs.proxy.DnsMessageInfo`.
@@ -243,7 +253,8 @@ public:
      * Process a DNS message asynchronously.
      * @param message A DNS message (request or response) in wire format.
      * @param info Additional parameters, `com.adguard.dnslibs.proxy.DnsMessageInfo`.
-     * @param callback Result callback, called on an unspecified thread, `com.adguard.dnslibs.proxy.DnsProxy.HandleMessageAsyncCallback`.
+     * @param callback Result callback, called on an unspecified thread,
+     * `com.adguard.dnslibs.proxy.DnsProxy.HandleMessageAsyncCallback`.
      */
     void handle_message_async(JNIEnv *env, jbyteArray message, jobject info, jobject callback);
 
@@ -261,7 +272,8 @@ public:
      * Checks if upstream is valid and available.
      * @return Null or error string marshalled to Java.
      */
-    jstring test_upstream(JNIEnv *env, jobject upstream_settings, jlong timeout_ms, jboolean ipv6, jobject events_adapter, jboolean offline);
+    jstring test_upstream(JNIEnv *env, jobject upstream_settings, jlong timeout_ms, jboolean ipv6,
+            jobject events_adapter, jboolean offline);
 
     /**
      * Suggest an action for filtering log event.
@@ -276,4 +288,4 @@ public:
     jstring generate_rule(JNIEnv *env, jobject tmplt, jobject event, jint options);
 };
 
-}
+} // namespace ag::dns

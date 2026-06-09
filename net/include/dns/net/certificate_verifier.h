@@ -1,13 +1,12 @@
 #pragma once
 
+#include <openssl/ssl.h>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <variant>
-#include <openssl/ssl.h>
 
 #include "common/utils.h"
-
 
 namespace ag::dns {
 
@@ -58,7 +57,14 @@ protected:
      * @return nullopt if verified successfully, non-nullopt otherwise
      */
     virtual std::optional<std::string> verify_fingerprints(
-            STACK_OF(X509) *chain, std::span<CertFingerprint> fingerprints) const;
+            STACK_OF(X509) * chain, std::span<CertFingerprint> fingerprints) const;
 };
+
+/**
+ * Format certificate diagnostic info from the given store context.
+ * Returns a string like "Subject: ..., Issuer: ..., Chain length: N",
+ * or an empty string if the leaf certificate is not available.
+ */
+std::string get_cert_diagnostic_info(X509_STORE_CTX *ctx);
 
 } // namespace ag::dns

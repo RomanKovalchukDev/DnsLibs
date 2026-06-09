@@ -6,9 +6,9 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
-#include <utility>
 
 #include <ldns/ldns.h>
 
@@ -39,6 +39,14 @@ public:
 
     const http::Request get_request_template() const {
         return m_request_template;
+    }
+
+    static http::Request mask_request_headers(http::Request request) {
+        if (request.headers().contains("Authorization")) {
+            request.headers().remove("Authorization");
+            request.headers().put("Authorization", "***");
+        }
+        return request;
     }
 
     DohUpstream() = delete;
