@@ -179,6 +179,14 @@ struct DnsProxySettings {
     bool enable_fallback_on_upstreams_failure;
 
     /**
+     * If true, every query is routed through fallback upstreams, bypassing the primary upstreams entirely
+     * (independent of `fallback_domains` matching and of `enable_fallback_on_upstreams_failure`).
+     * If no fallback upstreams are configured, queries will fail (SERVFAIL if
+     * `enable_servfail_on_upstreams_failure` is set, otherwise no response).
+     */
+    bool force_fallback_only;
+
+    /**
      * If true, when all upstreams (including fallback upstreams) fail to provide a response,
      * the proxy will respond with a SERVFAIL packet. Otherwise, no response is sent on such a failure.
      */

@@ -2,6 +2,8 @@
 
 #import "AGDnsXPCObject.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * EDNS Client Subnet option.
  * Represents the EDNS Client Subnet option in a DNS query.
@@ -24,15 +26,15 @@
 @property(nonatomic) NSInteger elapsed;   /**< Time elapsed on processing (in milliseconds) */
 @property(nonatomic) NSString *status;    /**< DNS answer's status */
 @property(nonatomic) NSString *answer;    /**< DNS Answers string representation */
-@property(nonatomic)
+@property(nonatomic, nullable)
         NSString *originalAnswer; /**< If blocked by CNAME, here will be DNS original answer's string representation */
-@property(nonatomic) NSNumber *upstreamId;               /**< ID of the upstream that provided this answer */
+@property(nonatomic, nullable) NSNumber *upstreamId;     /**< ID of the upstream that provided this answer */
 @property(nonatomic) NSInteger bytesSent;                /**< Number of bytes sent to a server */
 @property(nonatomic) NSInteger bytesReceived;            /**< Number of bytes received from a server */
 @property(nonatomic) NSArray<NSString *> *rules;         /**< Filtering rules texts */
 @property(nonatomic) NSArray<NSNumber *> *filterListIds; /**< Filter lists IDs of corresponding rules */
 @property(nonatomic) BOOL whitelist;                     /**< True if filtering rule is whitelist */
-@property(nonatomic)
+@property(nonatomic, nullable)
         NSString *error; /**< If not empty, contains the error text (occurred while processing the DNS query) */
 @property(nonatomic) BOOL cacheHit;            /**< True if this response was served from the cache */
 @property(nonatomic) BOOL dnssec;              /**< True if this response has DNSSEC rrsig */
@@ -61,5 +63,7 @@
  * consequently until it gets successful status, so in this case each failed upstream
  * fires the event - i.e., several events will be raised for the request.
  */
-@property(nonatomic, copy) void (^onRequestProcessed)(const AGDnsRequestProcessedEvent *event);
+@property(nonatomic, copy, nullable) void (^onRequestProcessed)(const AGDnsRequestProcessedEvent *event);
 @end
+
+NS_ASSUME_NONNULL_END

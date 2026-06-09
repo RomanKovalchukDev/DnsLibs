@@ -728,6 +728,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _blockH3Alpn = settings->block_h3_alpn;
     _enableParallelUpstreamQueries = settings->enable_parallel_upstream_queries;
     _enableFallbackOnUpstreamsFailure = settings->enable_fallback_on_upstreams_failure;
+    _forceFallbackOnly = settings->force_fallback_only;
     _enableServfailOnUpstreamsFailure = settings->enable_servfail_on_upstreams_failure;
     _enableHttp3 = settings->enable_http3;
     _enablePostQuantumCryptography = settings->enable_post_quantum_cryptography;
@@ -770,6 +771,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _blockH3Alpn = [coder decodeBoolForKey:@"_blockH3Alpn"];
         _enableParallelUpstreamQueries = [coder decodeBoolForKey:@"_enableParallelUpstreamQueries"];
         _enableFallbackOnUpstreamsFailure = [coder decodeBoolForKey:@"_enableFallbackOnUpstreamsFailure"];
+        _forceFallbackOnly = [coder decodeBoolForKey:@"_forceFallbackOnly"];
         _enableServfailOnUpstreamsFailure = [coder decodeBoolForKey:@"_enableServfailOnUpstreamsFailure"];
         _enableHttp3 = [coder decodeBoolForKey:@"_enableHttp3"];
         _enablePostQuantumCryptography = [coder decodeBoolForKey:@"_enablePostQuantumCryptography"];
@@ -812,6 +814,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeBool:self.blockH3Alpn forKey:@"_blockH3Alpn"];
     [coder encodeBool:self.enableParallelUpstreamQueries forKey:@"_enableParallelUpstreamQueries"];
     [coder encodeBool:self.enableFallbackOnUpstreamsFailure forKey:@"_enableFallbackOnUpstreamsFailure"];
+    [coder encodeBool:self.forceFallbackOnly forKey:@"_forceFallbackOnly"];
     [coder encodeBool:self.enableServfailOnUpstreamsFailure forKey:@"_enableServfailOnUpstreamsFailure"];
     [coder encodeBool:self.enableHttp3 forKey:@"_enableHttp3"];
     [coder encodeBool:self.enablePostQuantumCryptography forKey:@"_enablePostQuantumCryptography"];
@@ -849,6 +852,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [description appendFormat:@", self.blockH3Alpn=%d", self.blockH3Alpn];
     [description appendFormat:@", self.enableParallelUpstreamQueries=%d", self.enableParallelUpstreamQueries];
     [description appendFormat:@", self.enableFallbackOnUpstreamsFailure=%d", self.enableFallbackOnUpstreamsFailure];
+    [description appendFormat:@", self.forceFallbackOnly=%d", self.forceFallbackOnly];
     [description appendFormat:@", self.enableServfailOnUpstreamsFailure=%d", self.enableServfailOnUpstreamsFailure];
     [description appendFormat:@", self.enableHttp3=%d", self.enableHttp3];
     [description appendFormat:@", self.enablePostQuantumCryptography=%d", self.enablePostQuantumCryptography];
@@ -1458,6 +1462,7 @@ static DnsProxySettings convertConfig(AGDnsProxyConfig *config, const Logger &lo
     settings.block_h3_alpn = config.blockH3Alpn;
     settings.enable_parallel_upstream_queries = config.enableParallelUpstreamQueries;
     settings.enable_fallback_on_upstreams_failure = config.enableFallbackOnUpstreamsFailure;
+    settings.force_fallback_only = config.forceFallbackOnly;
     settings.enable_servfail_on_upstreams_failure = config.enableServfailOnUpstreamsFailure;
     settings.enable_http3 = config.enableHttp3;
     settings.enable_post_quantum_cryptography = config.enablePostQuantumCryptography;

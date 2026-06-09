@@ -2248,6 +2248,27 @@ TEST_F(DnsProxyTest, TransparentRequest) {
     ASSERT_EQ(1, ldns_pkt_ancount(result_pkt));
 }
 
+TEST_F(DnsProxyTest, ForceFallbackOnlyRoutesEverythingThroughFallback) {
+    DnsProxySettings settings = make_dnsproxy_settings();
+    // Bogus primary so we can prove the response came via fallback.
+    settings.upstreams = {{.address = "127.0.0.1:1"}};
+    settings.fallbacks = {{.address = "8.8.8.8"}};
+    settings.fallback_domains = {}; // intentionally empty
+    settings.enable_fallback_on_upstreams_failure = false;
+    settings.force_fallback_only = true;
+    DnsProxy proxy;
+    auto [ret, err] = proxy.init(settings, {});
+    ASSERT_TRUE(ret);
+    // example.com would never match an empty fallback_domains list, so success here
+    // can only come from force_fallback_only routing it through the fallback.
+    ldns_pkt_ptr request = create_request("example.com", LDNS_RR_TYPE_A, LDNS_RD);
+    ldns_pkt_ptr response;
+    perform_request(proxy, request, response);
+
+    ASSERT_EQ(LDNS_RCODE_NOERROR, ldns_pkt_get_rcode(response.get()));
+    proxy.deinit();
+}
+
 TEST_F(DnsProxyTest, FallbackDomainWorksWhenFallbackOnUpstreamsFailureDisabled) {
     DnsProxySettings settings = make_dnsproxy_settings();
     settings.upstreams = {{.address = "1.2.3.4"}};

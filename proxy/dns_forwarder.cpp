@@ -1194,7 +1194,8 @@ static CollectedUpstreams collect_upstreams(const std::vector<UpstreamPtr> &src,
 
 coro::Task<UpstreamExchangeResult> DnsForwarder::do_upstreams_exchange(
         std::string_view normalized_domain, const ldns_pkt *request, bool force_fallback, const DnsMessageInfo *info) {
-    bool fallback = !m_fallbacks.empty() && (force_fallback || apply_fallback_filter(normalized_domain, request));
+    bool fallback = !m_fallbacks.empty()
+            && (m_settings->force_fallback_only || force_fallback || apply_fallback_filter(normalized_domain, request));
     std::optional<UpstreamExchangeResult> last_result;
     if (!fallback) {
         auto [upstreams_to_query, max_rtt, has_unestimated] = collect_upstreams(m_upstreams, false);

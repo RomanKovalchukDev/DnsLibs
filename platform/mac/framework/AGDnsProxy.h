@@ -593,12 +593,12 @@ typedef NS_ENUM(NSInteger, AGDnsOutboundProxyProtocol) {
 /**
  * Device ID for the DNS proxy instance.
  */
-@property(nonatomic, nullable) NSString *ednsDeviceID;
+@property(nonatomic) NSString *ednsDeviceID;
 
 /**
  * Subscriber ID for the DNS proxy instance.
  */
-@property(nonatomic, nullable) NSString *ednsSubscriberID;
+@property(nonatomic) NSString *ednsSubscriberID;
 /**
  * If enabled, detect retransmitted requests and handle them using fallback upstreams only.
  */
@@ -625,6 +625,13 @@ typedef NS_ENUM(NSInteger, AGDnsOutboundProxyProtocol) {
  * Otherwise, fallback upstreams will only be used to resolve domains from `fallback_domains`.
  */
 @property(nonatomic) BOOL enableFallbackOnUpstreamsFailure;
+/**
+ * If true, every query is routed through fallback upstreams, bypassing the primary upstreams entirely
+ * (independent of `fallbackDomains` matching and of `enableFallbackOnUpstreamsFailure`).
+ * If no fallback upstreams are configured, queries will fail (SERVFAIL if
+ * `enableServfailOnUpstreamsFailure` is set, otherwise no response).
+ */
+@property(nonatomic) BOOL forceFallbackOnly;
 /**
  * If true, when all upstreams (including fallback upstreams) fail to provide a response,
  * the proxy will respond with a SERVFAIL packet. Otherwise, no response is sent on such a failure.
