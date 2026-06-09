@@ -16,6 +16,8 @@ public:
      * CNAME, google.com.
      */
     static std::string rr_list_to_string(const ldns_rr_list *rr_list);
+
+    static ldns_rdf * log_ends0_options(const ldns_pkt *packet);
 };
 
 } // namespace ag::dns

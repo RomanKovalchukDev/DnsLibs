@@ -188,6 +188,7 @@ void DnsForwarder::finalize_processed_event(DnsRequestProcessedEvent &event, con
         auto status = AllocatedPtr<char>(ldns_pkt_rcode2str(ldns_pkt_get_rcode(response)));
         event.status = status != nullptr ? status.get() : "";
         event.answer = DnsForwarderUtils::rr_list_to_string(ldns_pkt_answer(response));
+        event.edns_status_code = response->_edns_extended_rcode;
     } else {
         event.status.clear();
         event.answer.clear();
@@ -418,9 +419,14 @@ Error<DnsProxyInitError> DnsForwarder::init(EventLoopPtr loop, const DnsProxySet
 
     m_dns64_state = std::make_shared<dns64::State>();
     if (settings.dns64.has_value()) {
-        infolog(m_log, "DNS64 discovery is enabled");
-        coro::run_detached(discover_dns64_prefixes(settings.dns64->upstreams, settings.dns64->timeout, m_socket_factory,
-                m_dns64_state, *m_loop, settings.dns64->max_tries, settings.dns64->wait_time, m_shutdown_guard));
+        if (!settings.dns64->prefixes.empty()) {
+            infolog(m_log, "DNS64 using {} hardcoded prefix(es)", settings.dns64->prefixes.size());
+            m_dns64_state->prefixes = settings.dns64->prefixes;
+        } else {
+            infolog(m_log, "DNS64 discovery is enabled");
+            coro::run_detached(discover_dns64_prefixes(settings.dns64->upstreams, settings.dns64->timeout, m_socket_factory,
+                    m_dns64_state, *m_loop, settings.dns64->max_tries, settings.dns64->wait_time, m_shutdown_guard));
+        }
     }
 
     m_response_cache.set_capacity(m_settings->dns_cache_size);
@@ -615,6 +621,7 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
     }
 
     bool is_our_do_bit = m_settings->enable_dnssec_ok && DnssecHelpers::set_do_bit(ctx.request.get());
+    auto optionAdded = DnsEDNS0Helpers::set_edns_options(ctx.request.get(), m_settings->edns_device_id, m_settings->edns_subscriber_id);
 
     UpstreamExchangeResult exchange_result;
     ResponseCache::Result cached;
@@ -695,6 +702,8 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
     event.bytes_sent = static_cast<int32_t>(ldns_pkt_size(ctx.request.get()));
     event.bytes_received = static_cast<int32_t>(ldns_pkt_size(ctx.response.get()));
     event.dnssec = finalize_dnssec_log_logic(ctx.response.get(), is_our_do_bit);
+    event.ede_options = get_ends0_options(ctx.response.get());
+    
 
     if (LDNS_RCODE_NOERROR == ldns_pkt_get_rcode(ctx.response.get())) {
         auto filter_response =
@@ -706,12 +715,53 @@ coro::Task<DnsForwarder::HandleMessageResult> DnsForwarder::handle_message_inter
             co_return {transform_response_to_raw_data(filter_response.get()), std::move(event)};
         }
     }
-
     truncate_response(ctx.response.get(), ctx.request.get(), opt_as_ptr(info));
     finalize_processed_event(event, ctx.request.get(), ctx.response.get(), nullptr,
             selected_upstream ? std::make_optional(selected_upstream->options().id) : std::nullopt);
     auto response_wire = transform_response_to_raw_data(ctx.response.get());
     co_return {std::move(response_wire), std::move(event)};
+}
+
+std::vector< ag::dns::EDEOptionResult> DnsForwarder::get_ends0_options(const ldns_pkt *packet) {
+    std::vector< ag::dns::EDEOptionResult> results;
+
+    if (packet == nullptr) {
+        return results;
+    }
+
+    ldns_rdf * ednsdata = ldns_pkt_edns_data(packet);
+    ldns_edns_option_list * option_list = ldns_pkt_edns_get_option_list(const_cast<ldns_pkt *>(packet));
+
+    if (option_list == nullptr) {
+        return results;
+    }
+
+    size_t count = ldns_edns_option_list_get_count(option_list);
+    for (size_t i = 0; i < count; ++i) {
+        ldns_edns_option * option = ldns_edns_option_list_get_option(option_list, i);
+
+        if (option == nullptr) {
+            continue;
+        }
+
+        if (ldns_edns_get_code(option) == LDNS_EDNS_EDE) {
+            uint16_t ede_code = 0;
+            char * ede_text = nullptr;
+            if (ldns_edns_ede_get_code(option, &ede_code) == LDNS_STATUS_OK) {
+                if (ldns_edns_ede_get_text(option, &ede_text) != LDNS_STATUS_OK) {
+                    ede_text = nullptr;
+                }
+
+                results.push_back({ede_code, ede_text ? ede_text : ""});
+                LDNS_FREE(ede_text);
+            } 
+            else {
+                dbglog(m_log, "Malformed EDNS EDE option found");
+            }
+        }
+    }
+
+    return results;
 }
 
 coro::Task<ldns_pkt_ptr> DnsForwarder::apply_cname_filter(FilterContext &ctx, const ldns_rr *cname_rr) {

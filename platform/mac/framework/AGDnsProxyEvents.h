@@ -3,6 +3,17 @@
 #import "AGDnsXPCObject.h"
 
 /**
+ * EDNS Client Subnet option.
+ * Represents the EDNS Client Subnet option in a DNS query.
+ */
+@interface AGEDEOption : AGDnsXPCObject<NSSecureCoding>
+@property(nonatomic) NSInteger code; /**< EDNS Client Subnet option code */
+@property(nonatomic) NSString *text; /**< EDNS Client Subnet option text */
+- (instancetype)initWithCoder:(NSCoder *)coder;
+- (void)encodeWithCoder:(NSCoder *)coder;
+@end
+
+/**
  * @interface AGDnsRequestProcessedEvent
  * DNS request processed event.
  */
@@ -26,6 +37,10 @@
 @property(nonatomic) BOOL cacheHit;            /**< True if this response was served from the cache */
 @property(nonatomic) BOOL dnssec;              /**< True if this response has DNSSEC rrsig */
 @property(nonatomic) NSInteger blockingReason; /**< DNS blocking reason (AGDnsBlockingReason) */
+@property(nonatomic, nullable)
+        NSNumber *ednsStatusCode; /**< If not empty, contains the EDNS status code (if provided by upstream) */
+@property(nonatomic, nullable)
+        NSArray<AGEDEOption *> *edeOptions; /**< If not empty, contains the EDE options (if provided by upstream) */
 
 - (instancetype)initWithCoder:(NSCoder *)coder;
 

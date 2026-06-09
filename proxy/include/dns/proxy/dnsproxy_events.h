@@ -11,6 +11,11 @@
 
 namespace ag::dns {
 
+struct EDEOptionResult {
+    uint16_t code = 0;
+    std::string text;
+};
+
 /**
  * Dns blocking reason
  */
@@ -47,6 +52,8 @@ struct DnsRequestProcessedEvent {
     bool cache_hit = false; /**< True if this response was served from the cache */
     bool dnssec = false;    /**< True if this response has DNSSEC rrsig */
     DnsBlockingReason blocking_reason = DnsBlockingReason::DBR_NONE; /**< Dns blocking reason */
+    std::optional<uint8_t> edns_status_code; /**< If not empty, contains the EDE status code (if provided by upstream) */
+    std::vector<ag::dns::EDEOptionResult> ede_options; /**< If not empty, contains the EDE options (if provided by upstream) */
 };
 
 /**

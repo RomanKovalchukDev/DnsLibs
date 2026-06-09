@@ -475,6 +475,40 @@ TEST_F(DnsProxyTest, TestIpv6Blocking) {
     ASSERT_EQ(status, LDNS_STATUS_OK);
 }
 
+TEST_F(DnsProxyTest, TestDns64HardcodedPrefix) {
+    using namespace std::chrono_literals;
+    DnsProxySettings settings = make_dnsproxy_settings();
+    // Well-known NAT64 prefix 64:ff9b::/96 (12 bytes)
+    Uint8Vector wk_prefix = {0x00, 0x64, 0xff, 0x9b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    settings.dns64 = Dns64Settings{
+            .prefixes = {wk_prefix},
+    };
+    settings.upstream_timeout = 5000ms;
+
+    auto [ret, err] = m_proxy->init(settings, {});
+    ASSERT_TRUE(ret) << err->str();
+
+    // ipv4only.arpa has only A records (192.0.0.170, 192.0.0.171), no real AAAA
+    ldns_pkt_ptr response;
+    ASSERT_NO_FATAL_FAILURE(
+            perform_request(*m_proxy, create_request(IPV4_ONLY_HOST, LDNS_RR_TYPE_AAAA, LDNS_RD), response));
+    ASSERT_GE(ldns_pkt_ancount(response.get()), 1) << "Expected synthesized AAAA records";
+    ASSERT_EQ(ldns_pkt_get_rcode(response.get()), LDNS_RCODE_NOERROR);
+
+    // Verify synthesized address starts with the NAT64 prefix
+    const ldns_rr *rr = ldns_rr_list_rr(ldns_pkt_answer(response.get()), 0);
+    ASSERT_EQ(ldns_rr_get_type(rr), LDNS_RR_TYPE_AAAA);
+    const ldns_rdf *rdf = ldns_rr_rdf(rr, 0);
+    ASSERT_NE(rdf, nullptr);
+    ASSERT_EQ(ldns_rdf_size(rdf), 16u);
+    // First 4 bytes should be 0x00 0x64 0xff 0x9b (the 64:ff9b:: prefix)
+    const uint8_t *addr = ldns_rdf_data(rdf);
+    ASSERT_EQ(addr[0], 0x00);
+    ASSERT_EQ(addr[1], 0x64);
+    ASSERT_EQ(addr[2], 0xff);
+    ASSERT_EQ(addr[3], 0x9b);
+}
+
 TEST_F(DnsProxyTest, DdrBlocking) {
     DnsProxySettings settings = make_dnsproxy_settings();
 
@@ -2812,3 +2846,8 @@ TEST_F(DnsProxyTest, RegressCache2) {
 }
 
 } // namespace ag::dns::proxy::test
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

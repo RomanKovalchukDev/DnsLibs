@@ -1,7 +1,7 @@
 if (NOT EXISTS ${CMAKE_CURRENT_LIST_DIR}/conan_provider.cmake)
     set(_CONANFILES_ARCHIVE_NAME conanfiles.tar.gz)
     set(_CONANFILES_ARCHIVE ${CMAKE_CURRENT_LIST_DIR}/../conan/${_CONANFILES_ARCHIVE_NAME})
-    file(DOWNLOAD https://github.com/AdguardTeam/NativeLibsCommon/releases/latest/download/${_CONANFILES_ARCHIVE_NAME} ${_CONANFILES_ARCHIVE} STATUS _DOWNLOAD_STATUS)
+    file(DOWNLOAD https://github.com/RomanKovalchukDev/NativeLibsCommon//releases/latest/download/${_CONANFILES_ARCHIVE_NAME} ${_CONANFILES_ARCHIVE} STATUS _DOWNLOAD_STATUS)
     list(GET _DOWNLOAD_STATUS 0 _DOWNLOAD_STATUS_0)
     if (NOT _DOWNLOAD_STATUS_0 EQUAL 0)
         message(FATAL_ERROR "Conan files download failed: ${_DOWNLOAD_STATUS}")

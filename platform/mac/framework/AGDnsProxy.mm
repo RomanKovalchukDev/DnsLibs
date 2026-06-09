@@ -51,7 +51,7 @@ static std::string convert_string(NSString *str) {
     return "";
 }
 
-NSErrorDomain const AGDnsProxyErrorDomain = @"com.adguard.dnsproxy";
+NSErrorDomain const AGDnsProxyErrorDomain = @"ca.cira.dnsfirewall.dnsproxy";
 
 @implementation AGDnsLogger
 + (void) setLevel: (AGDnsLogLevel) level
@@ -266,6 +266,28 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     return native;
 }
 
+@implementation AGEDEOption
+
++ (BOOL)supportsSecureCoding {
+    return YES;
+}
+
+- (instancetype)initWithCoder:(NSCoder *)coder {
+    self = [super init];
+    if (self) {
+        _code = [coder decodeIntegerForKey:@"_code"];
+        _text = [coder decodeObjectOfClass:NSString.class forKey:@"_text"];
+    }
+    return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeInteger:self.code forKey:@"_code"];
+    [coder encodeObject:self.text forKey:@"_text"];
+}
+
+@end
+
 @implementation AGDnsUpstream
 
 + (BOOL)supportsSecureCoding {
@@ -342,6 +364,15 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _upstreams = upstreams;
     _maxTries = settings->max_tries;
     _waitTimeMs = settings->wait_time.count();
+    if (!settings->prefixes.empty()) {
+        auto &pref = settings->prefixes.front();
+        struct in6_addr addr = {};
+        std::memcpy(&addr, pref.data(), std::min(pref.size(), sizeof(addr)));
+        char buf[INET6_ADDRSTRLEN] = {};
+        if (inet_ntop(AF_INET6, &addr, buf, sizeof(buf))) {
+            _prefix = [NSString stringWithUTF8String: buf];
+        }
+    }
     return self;
 }
 
@@ -351,6 +382,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _upstreams = [coder decodeObjectOfClasses:[[NSSet alloc] initWithObjects:NSArray.class, AGDnsUpstream.class, nil] forKey:@"_upstreams"];
         _maxTries = [coder decodeInt64ForKey:@"_maxTries"];
         _waitTimeMs = [coder decodeInt64ForKey:@"_waitTimeMs"];
+        _prefix = [coder decodeObjectOfClass:NSString.class forKey:@"_prefix"];
     }
 
     return self;
@@ -360,6 +392,7 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeObject:self.upstreams forKey:@"_upstreams"];
     [coder encodeInt64:self.maxTries forKey:@"_maxTries"];
     [coder encodeInt64:self.waitTimeMs forKey:@"_waitTimeMs"];
+    [coder encodeObject:self.prefix forKey:@"_prefix"];
 }
 
 - (NSString*)description {
@@ -683,6 +716,12 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _upstreamTimeoutMs = settings->upstream_timeout.count();
     _optimisticCache = settings->optimistic_cache;
     _enableDNSSECOK = settings->enable_dnssec_ok;
+    if (settings->edns_device_id.has_value()) {
+        _ednsDeviceID = convert_string(settings->edns_device_id.value());
+    }
+    if (settings->edns_subscriber_id.has_value()) {
+        _ednsSubscriberID = convert_string(settings->edns_subscriber_id.value());
+    }
     _enableRetransmissionHandling = settings->enable_retransmission_handling;
     _enableRouteResolver = settings->enable_route_resolver;
     _blockEch = settings->block_ech;
@@ -723,6 +762,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _upstreamTimeoutMs = [coder decodeInt64ForKey:@"_upstreamTimeoutMs"];
         _optimisticCache = [coder decodeBoolForKey:@"_optimisticCache"];
         _enableDNSSECOK = [coder decodeBoolForKey:@"_enableDNSSECOK"];
+        _ednsDeviceID = [coder decodeObjectOfClass:NSString.class forKey:@"_ednsDeviceID"];
+        _ednsSubscriberID = [coder decodeObjectOfClass:NSString.class forKey:@"_ednsSubscriberID"];
         _enableRetransmissionHandling = [coder decodeBoolForKey:@"_enableRetransmissionHandling"];
         _enableRouteResolver = [coder decodeBoolForKey:@"_enableRouteResolver"];
         _blockEch = [coder decodeBoolForKey:@"_blockEch"];
@@ -863,6 +904,18 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     _cacheHit = event.cache_hit;
 
     _dnssec = event.dnssec;
+    _ednsStatusCode = event.edns_status_code ? [NSNumber numberWithInt:*event.edns_status_code] : nil;
+
+    NSMutableArray<AGEDEOption *> *edeOptions = [[NSMutableArray alloc] initWithCapacity: event.ede_options.size()];
+
+    for (size_t i = 0; i < event.ede_options.size(); ++i) {
+        AGEDEOption *edeOption = [[AGEDEOption alloc] init];
+        edeOption.code = event.ede_options[i].code;
+        edeOption.text = convert_string(event.ede_options[i].text);
+        [edeOptions addObject:edeOption];
+    }
+
+    _edeOptions = edeOptions;
 
     _blockingReason = (NSInteger)event.blocking_reason;
 
@@ -894,6 +947,18 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         event.upstream_id = _upstreamId.intValue;
     }
     event.whitelist = _whitelist;
+    
+    if (_ednsStatusCode) {
+        event.edns_status_code = _ednsStatusCode.intValue;
+    }
+
+    for (AGEDEOption *option in _edeOptions) {
+        ag::dns::EDEOptionResult edeOption;  // Fixed: removed pointer, made it a stack object
+        edeOption.code = option.code;
+        edeOption.text = convert_string(option.text);
+        event.ede_options.emplace_back(edeOption);
+    }
+
     return event;
 }
 
@@ -916,6 +981,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
         _error = [coder decodeObjectOfClass:NSString.class forKey:@"_error"];
         _cacheHit = [coder decodeBoolForKey:@"_cacheHit"];
         _dnssec = [coder decodeBoolForKey:@"_dnssec"];
+        _ednsStatusCode = [coder decodeObjectOfClass:NSNumber.class forKey:@"_ednsStatusCode"];
+        _edeOptions = [coder decodeObjectOfClasses:[[NSSet alloc] initWithObjects:NSArray.class, AGEDEOption.class, nil] forKey:@"_edeOptions"];
         _blockingReason = [coder decodeIntegerForKey:@"_blockingReason"];
     }
 
@@ -939,6 +1006,8 @@ static ServerStamp convert_stamp(AGDnsStamp *stamp) {
     [coder encodeObject:self.error forKey:@"_error"];
     [coder encodeBool:self.cacheHit forKey:@"_cacheHit"];
     [coder encodeBool:self.dnssec forKey:@"_dnssec"];
+    [coder encodeObject:self.ednsStatusCode forKey:@"_ednsStatusCode"];
+    [coder encodeObject:self.edeOptions forKey:@"_edeOptions"];
     [coder encodeInteger:self.blockingReason forKey:@"_blockingReason"];
 }
 
@@ -1346,16 +1415,24 @@ static DnsProxySettings convertConfig(AGDnsProxyConfig *config, const Logger &lo
 
     if (config.dns64Settings != nil) {
         NSArray<AGDnsUpstream *> *dns64_upstreams = config.dns64Settings.upstreams;
-        if (dns64_upstreams == nil) {
-            dbglog(log, "DNS64 upstreams list is nil");
-        } else if ([dns64_upstreams count] == 0) {
-            dbglog(log, "DNS64 upstreams list is empty");
+        std::vector<Uint8Vector> native_prefixes;
+        if (config.dns64Settings.prefix != nil) {
+            struct in6_addr addr = {};
+            if (inet_pton(AF_INET6, [config.dns64Settings.prefix UTF8String], &addr) == 1) {
+                native_prefixes.emplace_back((const uint8_t *)&addr, (const uint8_t *)&addr + 12);
+            } else {
+                dbglog(log, "DNS64: failed to parse prefix '{}'", [config.dns64Settings.prefix UTF8String]);
+            }
+        }
+        if (native_prefixes.empty() && (dns64_upstreams == nil || [dns64_upstreams count] == 0)) {
+            dbglog(log, "DNS64 settings have no prefix and no upstreams");
         } else {
             settings.dns64 = Dns64Settings{
-                    .upstreams = convert_upstreams(dns64_upstreams),
+                    .upstreams = dns64_upstreams != nil ? convert_upstreams(dns64_upstreams) : std::vector<UpstreamOptions>{},
                     .max_tries = config.dns64Settings.maxTries > 0
                                  ? static_cast<uint32_t>(config.dns64Settings.maxTries) : 0,
                     .wait_time = std::chrono::milliseconds(config.dns64Settings.waitTimeMs),
+                    .prefixes = std::move(native_prefixes),
             };
         }
     }
@@ -1384,6 +1461,14 @@ static DnsProxySettings convertConfig(AGDnsProxyConfig *config, const Logger &lo
     settings.enable_servfail_on_upstreams_failure = config.enableServfailOnUpstreamsFailure;
     settings.enable_http3 = config.enableHttp3;
     settings.enable_post_quantum_cryptography = config.enablePostQuantumCryptography;
+
+    if (config.ednsDeviceID != nil) {
+        settings.edns_device_id = config.ednsDeviceID.UTF8String;
+    }
+
+    if (config.ednsSubscriberID != nil) {
+        settings.edns_subscriber_id = config.ednsSubscriberID.UTF8String;
+    }
 
 #if TARGET_OS_IPHONE
     settings.qos_settings.qos_class = config.qosSettings.qosClass;
@@ -1506,8 +1591,6 @@ static DnsProxySettings convertConfig(AGDnsProxyConfig *config, const Logger &lo
                                  userInfo:@{NSLocalizedDescriptionKey : convert_string(str)}];
     }
     self->initialized = YES;
-
-    infolog(*self->log, "Dns proxy initialized");
 
     return self;
 }

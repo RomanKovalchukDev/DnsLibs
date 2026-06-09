@@ -2,6 +2,7 @@
 #include "common/defs.h"
 #include "common/utils.h"
 
+
 namespace ag::dns {
 
 std::string DnsForwarderUtils::rr_list_to_string(const ldns_rr_list *rr_list) {
