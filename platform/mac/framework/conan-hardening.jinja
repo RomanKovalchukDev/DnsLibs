@@ -1,0 +1,17 @@
+# Conan host-profile fragment appended by build_dnsproxy_framework.sh.
+#
+# Purpose (CI938 - Information Leakage): rewrite absolute build-system paths out
+# of dependency binaries so that __FILE__ string literals (e.g. libevent's
+# EVUTIL_ASSERT, fmt asserts) and debug info do not embed the builder's home
+# directory / username into the shipped framework.
+#
+# Rendered through Conan's Jinja engine; {{ os.getenv('HOME') }} expands to the
+# building user's home dir, so no username is hardcoded and the same profile
+# works on developer machines and CI runners alike. The default Conan cache
+# ($HOME/.conan2) sits under HOME, so this also cleans /Users/<user>/.conan2/...
+#
+# `+=` appends to whatever the platform profile already sets instead of
+# replacing it.
+[conf]
+tools.build:cflags+=["-ffile-prefix-map={{ os.getenv('HOME') }}=."]
+tools.build:cxxflags+=["-ffile-prefix-map={{ os.getenv('HOME') }}=."]

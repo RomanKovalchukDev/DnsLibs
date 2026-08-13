@@ -50,6 +50,19 @@ set(DNS_LIBS_DIR ../../..)
 add_compile_options(-fno-strict-aliasing -fno-exceptions -fobjc-abi-version=2)
 add_definitions(-DFMT_EXCEPTIONS=0)
 
+# CI938 - Information Leakage: strip absolute build-system paths (developer home
+# and source root) from __FILE__ literals and debug info so the shipped binary
+# does not embed the builder's username or local directory layout. Applies to
+# this project and every subdirectory added below (e.g. proxy/). External Conan
+# dependencies are covered separately via conan-hardening.jinja.
+# Order matters: clang uses the last matching -ffile-prefix-map, so the more
+# specific source-root mapping is listed last to win over the HOME mapping.
+get_filename_component(_DNSLIBS_ABS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/${DNS_LIBS_DIR}" ABSOLUTE)
+add_compile_options(
+    "-ffile-prefix-map=$ENV{HOME}=."
+    "-ffile-prefix-map=${_DNSLIBS_ABS_ROOT}=DnsLibs"
+)
+
 add_library(AGDnsProxy SHARED
     AGDnsProxyEvents.h
     AGDnsProxy.h AGDnsProxy.mm
