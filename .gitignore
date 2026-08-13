@@ -8,6 +8,10 @@ CMakeUserPresets.json
 # mac/ios test app
 platform/mac/testapp/framework/
 
+# mac/ios framework build output
+framework-all/
+platform/mac/framework/framework/
+
 # OS X
 .DS_Store
 
