@@ -1,0 +1,49 @@
+DnsLibs
+
+Copyright (c) AdGuard Software Ltd.
+
+This product includes software developed by AdGuard Software Ltd.
+(https://github.com/AdguardTeam/DnsLibs), licensed under the Apache
+License, Version 2.0. A copy of the license is provided in LICENSE.md.
+
+--------------------------------------------------------------------------
+Modifications
+--------------------------------------------------------------------------
+
+In accordance with Section 4(b) of the Apache License, Version 2.0, this
+notice states that the following files were modified or added, relative to
+upstream DnsLibs v2.8.54, by Roman Kovalchuk in 2025 and 2026.
+
+Proxy core:
+  proxy/dns_forwarder.cpp                     - modified
+  proxy/dns_forwarder.h                       - modified
+  proxy/dns_forwarder_utils.cpp               - modified
+  proxy/dns_forwarder_utils.h                 - modified
+  proxy/dnsproxy.cpp                          - modified
+  proxy/dnssec_ok.h                           - added
+  proxy/svcb.h                                - modified
+  proxy/include/dns/proxy/dnsproxy_events.h   - modified
+  proxy/include/dns/proxy/dnsproxy_settings.h - modified
+  proxy/test/dnsproxy_test.cpp                - modified
+
+Apple framework wrapper:
+  platform/mac/framework/AGDnsProxy.h         - modified
+  platform/mac/framework/AGDnsProxy.mm        - modified
+  platform/mac/framework/AGDnsProxyEvents.h   - modified
+  platform/mac/framework/CMakeLists.txt       - modified
+  platform/mac/framework/Info.plist.ios       - modified
+  platform/mac/framework/Info.plist.macos     - modified
+  platform/mac/framework/build_dnsproxy_framework.sh - added
+  platform/mac/framework/conan-hardening.jinja       - added
+
+Build configuration:
+  conanfile.py                                - modified
+  cmake/conan_bootstrap.cmake                 - modified
+
+Summary of changes: extended DNS error (EDE) and EDNS0 device-id options
+exposed through the proxy settings, events, and Apple framework wrapper;
+optional DNS64 fixed-prefix synthesis; a force-fallback-only upstream mode;
+DNSSEC-OK handling; and framework build, identity, and hardening changes.
+
+The modifications above are licensed under the Apache License, Version 2.0,
+the same terms as the original work.
