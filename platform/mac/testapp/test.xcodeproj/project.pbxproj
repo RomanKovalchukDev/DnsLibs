@@ -18,15 +18,15 @@
 		C44240122379BB2F00FD1D4C /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = C4423F9B2379559D00FD1D4C /* main.m */; };
 		C44240132379BB3800FD1D4C /* SceneDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = C4423F8D2379559900FD1D4C /* SceneDelegate.m */; };
 		C48B7D68239AAB4E004DDDC8 /* filter.txt in Resources */ = {isa = PBXBuildFile; fileRef = C4FAE4A2237BE77800ECE0B2 /* filter.txt */; };
-		C4AEED15237AC8A10021E53F /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; };
-		C4AEED16237AC90C0021E53F /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; };
-		C4AEED17237AC9100021E53F /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; };
-		C4AEED18237AC9140021E53F /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		C4AEED19237AC9170021E53F /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		C4AEED1A237AC9260021E53F /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; };
+		C4AEED15237AC8A10021E53F /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; };
+		C4AEED16237AC90C0021E53F /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; };
+		C4AEED17237AC9100021E53F /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; };
+		C4AEED18237AC9140021E53F /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		C4AEED19237AC9170021E53F /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		C4AEED1A237AC9260021E53F /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; };
 		C4B58FDB237184390044CE54 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F4D5969A1F7C01BD00538851 /* NetworkExtension.framework */; };
-		C4FAE493237BE37100ECE0B2 /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		C4FAE494237BE37600ECE0B2 /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		C4FAE493237BE37100ECE0B2 /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		C4FAE494237BE37600ECE0B2 /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C4FAE495237BE41A00ECE0B2 /* ext-ios.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = C4423F7023794EA900FD1D4C /* ext-ios.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C4FAE4A5237BE78E00ECE0B2 /* filter.txt in Resources */ = {isa = PBXBuildFile; fileRef = C4FAE4A2237BE77800ECE0B2 /* filter.txt */; };
 		C4FAE4A6237BE79300ECE0B2 /* PacketTunnelProvider.m in Sources */ = {isa = PBXBuildFile; fileRef = C4FAE4A3237BE77800ECE0B2 /* PacketTunnelProvider.m */; };
@@ -82,7 +82,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				C4FAE493237BE37100ECE0B2 /* AGDnsProxy.framework in Embed Frameworks */,
+				C4FAE493237BE37100ECE0B2 /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -93,7 +93,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				C4AEED19237AC9170021E53F /* AGDnsProxy.framework in Embed Frameworks */,
+				C4AEED19237AC9170021E53F /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -104,7 +104,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				C4FAE494237BE37600ECE0B2 /* AGDnsProxy.framework in Embed Frameworks */,
+				C4FAE494237BE37600ECE0B2 /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -126,7 +126,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				C4AEED18237AC9140021E53F /* AGDnsProxy.framework in Embed Frameworks */,
+				C4AEED18237AC9140021E53F /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -162,7 +162,7 @@
 		C4423F982379559D00FD1D4C /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		C4423F9A2379559D00FD1D4C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C4423F9B2379559D00FD1D4C /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
-		C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AGDnsProxy.framework; path = framework/AGDnsProxy.framework; sourceTree = "<group>"; };
+		C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NerdDnsProxy.framework; path = framework/NerdDnsProxy.framework; sourceTree = "<group>"; };
 		C4FAE49F237BE77800ECE0B2 /* vpn.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = vpn.m; sourceTree = "<group>"; };
 		C4FAE4A0237BE77800ECE0B2 /* PacketTunnelProvider.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PacketTunnelProvider.h; sourceTree = "<group>"; };
 		C4FAE4A1237BE77800ECE0B2 /* vpn.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vpn.h; sourceTree = "<group>"; };
@@ -192,7 +192,7 @@
 			files = (
 				C4423F7D23794F3200FD1D4C /* NetworkExtension.framework in Frameworks */,
 				1DECADC829197A6400BB60DE /* SystemConfiguration.framework in Frameworks */,
-				C4AEED16237AC90C0021E53F /* AGDnsProxy.framework in Frameworks */,
+				C4AEED16237AC90C0021E53F /* NerdDnsProxy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -201,7 +201,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C4423FA3237955C400FD1D4C /* NetworkExtension.framework in Frameworks */,
-				C4AEED1A237AC9260021E53F /* AGDnsProxy.framework in Frameworks */,
+				C4AEED1A237AC9260021E53F /* NerdDnsProxy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -211,7 +211,7 @@
 			files = (
 				F499C4461F6A9D0D00FB55F8 /* Cocoa.framework in Frameworks */,
 				C4B58FDB237184390044CE54 /* NetworkExtension.framework in Frameworks */,
-				C4AEED17237AC9100021E53F /* AGDnsProxy.framework in Frameworks */,
+				C4AEED17237AC9100021E53F /* NerdDnsProxy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -220,7 +220,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F40E749C206D1D6B000F5A41 /* Cocoa.framework in Frameworks */,
-				C4AEED15237AC8A10021E53F /* AGDnsProxy.framework in Frameworks */,
+				C4AEED15237AC8A10021E53F /* NerdDnsProxy.framework in Frameworks */,
 				F4D5969B1F7C01BD00538851 /* NetworkExtension.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -272,7 +272,7 @@
 			isa = PBXGroup;
 			children = (
 				1DECADC729197A6400BB60DE /* SystemConfiguration.framework */,
-				C4AEED14237AC8A10021E53F /* AGDnsProxy.framework */,
+				C4AEED14237AC8A10021E53F /* NerdDnsProxy.framework */,
 				F4D5969A1F7C01BD00538851 /* NetworkExtension.framework */,
 				F499C4451F6A9D0D00FB55F8 /* Cocoa.framework */,
 			);

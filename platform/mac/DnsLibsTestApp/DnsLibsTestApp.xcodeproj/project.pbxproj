@@ -13,12 +13,12 @@
 		A5D69C6E2F16C97400E56032 /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A5D69C652F16C97400E56032 /* PacketTunnel.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A5D69C782F16C98D00E56032 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69C402F16C8EC00E56032 /* NetworkExtension.framework */; };
 		A5D69C822F16C98D00E56032 /* com.adguard.dns.DnsLibsTestApp.SystemExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = A5D69C772F16C98D00E56032 /* com.adguard.dns.DnsLibsTestApp.SystemExtension.systemextension */; platformFilters = (macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A5D69CE12F1EB0B400E56032 /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */; };
-		A5D69CE22F1EB0B400E56032 /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		A5D69CE42F1EB0B800E56032 /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */; };
-		A5D69CE52F1EB0B800E56032 /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		A5D69CE72F1EB0BC00E56032 /* AGDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */; };
-		A5D69CE82F1EB0BC00E56032 /* AGDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A5D69CE12F1EB0B400E56032 /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */; };
+		A5D69CE22F1EB0B400E56032 /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A5D69CE42F1EB0B800E56032 /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */; };
+		A5D69CE52F1EB0B800E56032 /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A5D69CE72F1EB0BC00E56032 /* NerdDnsProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */; };
+		A5D69CE82F1EB0BC00E56032 /* NerdDnsProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -75,7 +75,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				A5D69CE22F1EB0B400E56032 /* AGDnsProxy.framework in Embed Frameworks */,
+				A5D69CE22F1EB0B400E56032 /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -86,7 +86,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				A5D69CE52F1EB0B800E56032 /* AGDnsProxy.framework in Embed Frameworks */,
+				A5D69CE52F1EB0B800E56032 /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -97,7 +97,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				A5D69CE82F1EB0BC00E56032 /* AGDnsProxy.framework in Embed Frameworks */,
+				A5D69CE82F1EB0BC00E56032 /* NerdDnsProxy.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -110,7 +110,7 @@
 		A5D69C532F16C96000E56032 /* DnsProxy.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DnsProxy.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5D69C652F16C97400E56032 /* PacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5D69C772F16C98D00E56032 /* com.adguard.dns.DnsLibsTestApp.SystemExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = com.adguard.dns.DnsLibsTestApp.SystemExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
-		A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AGDnsProxy.framework; path = framework/AGDnsProxy.framework; sourceTree = "<group>"; };
+		A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NerdDnsProxy.framework; path = framework/NerdDnsProxy.framework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -232,7 +232,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A5D69C542F16C96000E56032 /* NetworkExtension.framework in Frameworks */,
-				A5D69CE72F1EB0BC00E56032 /* AGDnsProxy.framework in Frameworks */,
+				A5D69CE72F1EB0BC00E56032 /* NerdDnsProxy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,7 +241,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A5D69C662F16C97400E56032 /* NetworkExtension.framework in Frameworks */,
-				A5D69CE42F1EB0B800E56032 /* AGDnsProxy.framework in Frameworks */,
+				A5D69CE42F1EB0B800E56032 /* NerdDnsProxy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -250,7 +250,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A5D69C782F16C98D00E56032 /* NetworkExtension.framework in Frameworks */,
-				A5D69CE12F1EB0B400E56032 /* AGDnsProxy.framework in Frameworks */,
+				A5D69CE12F1EB0B400E56032 /* NerdDnsProxy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -283,7 +283,7 @@
 		A5D69C3F2F16C8EC00E56032 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				A5D69CDC2F1EA98500E56032 /* AGDnsProxy.framework */,
+				A5D69CDC2F1EA98500E56032 /* NerdDnsProxy.framework */,
 				A5D69C402F16C8EC00E56032 /* NetworkExtension.framework */,
 			);
 			name = Frameworks;

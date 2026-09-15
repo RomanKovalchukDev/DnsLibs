@@ -18,7 +18,7 @@ BUILD_DIR="${SRCROOT}/framework"
 FRAMEWORK_DIR="${SRCROOT}/../framework"
 
 if [ -z ${TARGETNAME+x} ]; then
-    TARGET_NAME="AGDnsProxy"
+    TARGET_NAME="NerdDnsProxy"
 else
     TARGET_NAME="${TARGETNAME}"
 fi
@@ -185,13 +185,13 @@ else
     rm -rf "${BUILD_DIR}/framework-iphonesimulator"
 
     mkdir -p "${BUILD_DIR}/framework-macos"
-    cp -Rf "${BUILD_DIR}/framework-macos-x86_64/AGDnsProxy.framework" "${BUILD_DIR}/framework-macos/"
-    rm "${BUILD_DIR}"/framework-macos/AGDnsProxy.framework/Versions/A/AGDnsProxy
-    lipo -create -output "${BUILD_DIR}"/framework-macos{,-x86_64,-arm64}/AGDnsProxy.framework/Versions/A/AGDnsProxy
+    cp -Rf "${BUILD_DIR}/framework-macos-x86_64/NerdDnsProxy.framework" "${BUILD_DIR}/framework-macos/"
+    rm "${BUILD_DIR}"/framework-macos/NerdDnsProxy.framework/Versions/A/NerdDnsProxy
+    lipo -create -output "${BUILD_DIR}"/framework-macos{,-x86_64,-arm64}/NerdDnsProxy.framework/Versions/A/NerdDnsProxy
     mkdir -p "${BUILD_DIR}/framework-iphonesimulator"
-    cp -Rf "${BUILD_DIR}/framework-iphonesimulator-x86_64/AGDnsProxy.framework" "${BUILD_DIR}/framework-iphonesimulator/"
-    rm "${BUILD_DIR}"/framework-iphonesimulator/AGDnsProxy.framework/AGDnsProxy
-    lipo -create -output "${BUILD_DIR}"/framework-iphonesimulator{,-x86_64,-arm64}/AGDnsProxy.framework/AGDnsProxy
+    cp -Rf "${BUILD_DIR}/framework-iphonesimulator-x86_64/NerdDnsProxy.framework" "${BUILD_DIR}/framework-iphonesimulator/"
+    rm "${BUILD_DIR}"/framework-iphonesimulator/NerdDnsProxy.framework/NerdDnsProxy
+    lipo -create -output "${BUILD_DIR}"/framework-iphonesimulator{,-x86_64,-arm64}/NerdDnsProxy.framework/NerdDnsProxy
 
     args=()
     for final_arch in macos ios-arm64 iphonesimulator; do

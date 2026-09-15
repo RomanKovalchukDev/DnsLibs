@@ -1,5 +1,5 @@
 import NetworkExtension
-import AGDnsProxy
+import NerdDnsProxy
 
 class DNSProxyProvider: NEDNSProxyProvider {
     var dnsProxy: AGDnsProxy?

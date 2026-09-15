@@ -1,4 +1,4 @@
-framework module AGDnsProxy {
+framework module NerdDnsProxy {
     umbrella header "AGDnsProxyModule.h"
     export *
     module * { export * }

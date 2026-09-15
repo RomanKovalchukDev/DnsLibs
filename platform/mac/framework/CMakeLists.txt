@@ -63,7 +63,7 @@ add_compile_options(
     "-ffile-prefix-map=${_DNSLIBS_ABS_ROOT}=DnsLibs"
 )
 
-add_library(AGDnsProxy SHARED
+add_library(NerdDnsProxy SHARED
     AGDnsProxyEvents.h
     AGDnsProxy.h AGDnsProxy.mm
     AGDnsTunListener.h AGDnsTunListener.mm
@@ -73,11 +73,11 @@ add_library(AGDnsProxy SHARED
     AGDnsProxyModule.h module.modulemap
 )
 if("${TARGET_OS}" STREQUAL "macos")
-    target_sources(AGDnsProxy PRIVATE NSTask+AGUtils.mm)
+    target_sources(NerdDnsProxy PRIVATE NSTask+AGUtils.mm)
 endif()
-set_property(TARGET AGDnsProxy PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET NerdDnsProxy PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-set_target_properties(AGDnsProxy PROPERTIES
+set_target_properties(NerdDnsProxy PROPERTIES
     FRAMEWORK TRUE
     FRAMEWORK_VERSION A
     VERSION 2.8.53
@@ -88,7 +88,7 @@ set_target_properties(AGDnsProxy PROPERTIES
     BUILD_WITH_INSTALL_RPATH 1
     COMPILE_FLAGS "-fobjc-arc"
 )
-set_property(TARGET AGDnsProxy PROPERTY PUBLIC_HEADER
+set_property(TARGET NerdDnsProxy PROPERTY PUBLIC_HEADER
     AGDnsProxy.h
     AGDnsProxyEvents.h
     AGDnsTunListener.h
@@ -100,9 +100,9 @@ set_property(TARGET AGDnsProxy PROPERTY PUBLIC_HEADER
 set_property(SOURCE module.modulemap
         PROPERTY MACOSX_PACKAGE_LOCATION "Modules")
 if("${TARGET_OS}" STREQUAL "macos")
-add_custom_command(TARGET AGDnsProxy POST_BUILD
+add_custom_command(TARGET NerdDnsProxy POST_BUILD
         COMMAND
-        ${CMAKE_COMMAND} -E create_symlink "Versions/Current/Modules" "${CMAKE_BINARY_DIR}/AGDnsProxy.framework/Modules")
+        ${CMAKE_COMMAND} -E create_symlink "Versions/Current/Modules" "${CMAKE_BINARY_DIR}/NerdDnsProxy.framework/Modules")
 endif()
 
 add_definitions(-D_BUILDING_DNSPROXY_FRAMEWORK=1)
@@ -111,10 +111,10 @@ if (NOT TARGET dnsproxy)
 endif ()
 
 find_package(native_libs_common REQUIRED)
-target_link_libraries(AGDnsProxy dnsproxy resolv native_libs_common::native_libs_common)
+target_link_libraries(NerdDnsProxy dnsproxy resolv native_libs_common::native_libs_common)
 
 if (APPLE)
-    target_link_libraries(AGDnsProxy "-framework Foundation" "-framework CoreFoundation" "-framework NetworkExtension")
+    target_link_libraries(NerdDnsProxy "-framework Foundation" "-framework CoreFoundation" "-framework NetworkExtension")
 endif ()
 
 enable_testing()
@@ -129,8 +129,8 @@ function(add_test_target TARGET_NAME SOURCE_FILE)
     target_link_libraries(${TARGET_NAME}
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
-    add_dependencies(${TARGET_NAME} AGDnsProxy)
+            "-framework NerdDnsProxy -framework Foundation")
+    add_dependencies(${TARGET_NAME} NerdDnsProxy)
     add_dependencies(tests ${TARGET_NAME})
     add_test(NAME ${TARGET_NAME}Test COMMAND ${TARGET_NAME})
 endfunction()
@@ -142,8 +142,8 @@ if("${TARGET_OS}" STREQUAL "macos")
     target_link_libraries(test_AGDnsProxyListenerFailsInit
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
-    add_dependencies(test_AGDnsProxyListenerFailsInit AGDnsProxy)
+            "-framework NerdDnsProxy -framework Foundation")
+    add_dependencies(test_AGDnsProxyListenerFailsInit NerdDnsProxy)
     add_dependencies(tests test_AGDnsProxyListenerFailsInit)
     add_test(AGDnsProxyListenerFailsInitTest test_AGDnsProxyListenerFailsInit)
 
@@ -153,40 +153,40 @@ if("${TARGET_OS}" STREQUAL "macos")
     target_link_libraries(test_AGDnsStamp
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
-    add_dependencies(test_AGDnsStamp AGDnsProxy)
+            "-framework NerdDnsProxy -framework Foundation")
+    add_dependencies(test_AGDnsStamp NerdDnsProxy)
     add_dependencies(tests test_AGDnsStamp)
     add_test(AGDnsStampTest test_AGDnsStamp)
 
     add_executable(test_BindHelper EXCLUDE_FROM_ALL test_BindHelper.mm)
     target_compile_options(test_BindHelper PRIVATE "-fobjc-arc")
     target_compile_options(test_BindHelper PRIVATE -F${CMAKE_CURRENT_BINARY_DIR})
-    add_dependencies(test_BindHelper AGDnsProxy)
+    add_dependencies(test_BindHelper NerdDnsProxy)
     target_link_libraries(test_BindHelper
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
+            "-framework NerdDnsProxy -framework Foundation")
     add_dependencies(tests test_BindHelper)
 
     add_executable(test_ListenerInitError EXCLUDE_FROM_ALL test_ListenerInitError.mm)
     target_compile_options(test_ListenerInitError PRIVATE "-fobjc-arc")
     target_compile_options(test_ListenerInitError PRIVATE -F${CMAKE_CURRENT_BINARY_DIR})
-    add_dependencies(test_ListenerInitError AGDnsProxy)
+    add_dependencies(test_ListenerInitError NerdDnsProxy)
     target_link_libraries(test_ListenerInitError
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
+            "-framework NerdDnsProxy -framework Foundation")
     add_dependencies(tests test_ListenerInitError)
     add_test(ListenerInitError test_ListenerInitError)
 
     add_executable(test_AGDnsProxyHandleMessageAsyncTransparent EXCLUDE_FROM_ALL test_AGDnsProxyHandleMessageAsyncTransparent.mm)
     target_compile_options(test_AGDnsProxyHandleMessageAsyncTransparent PRIVATE "-fobjc-arc")
     target_compile_options(test_AGDnsProxyHandleMessageAsyncTransparent PRIVATE -F${CMAKE_CURRENT_BINARY_DIR})
-    add_dependencies(test_AGDnsProxyHandleMessageAsyncTransparent AGDnsProxy)
+    add_dependencies(test_AGDnsProxyHandleMessageAsyncTransparent NerdDnsProxy)
     target_link_libraries(test_AGDnsProxyHandleMessageAsyncTransparent
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
+            "-framework NerdDnsProxy -framework Foundation")
     add_dependencies(tests test_AGDnsProxyHandleMessageAsyncTransparent)
     add_test(ListenerInitError test_AGDnsProxyHandleMessageAsyncTransparent)
 
@@ -196,8 +196,8 @@ if("${TARGET_OS}" STREQUAL "macos")
     target_link_libraries(test_AGDnsProxyStandalone
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
-    add_dependencies(test_AGDnsProxyStandalone AGDnsProxy)
+            "-framework NerdDnsProxy -framework Foundation")
+    add_dependencies(test_AGDnsProxyStandalone NerdDnsProxy)
     add_dependencies(tests test_AGDnsProxyStandalone)
 
     add_executable(test_AGDnsProxyReapplySettings EXCLUDE_FROM_ALL test_AGDnsProxyReapplySettings.mm)
@@ -206,8 +206,8 @@ if("${TARGET_OS}" STREQUAL "macos")
     target_link_libraries(test_AGDnsProxyReapplySettings
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation")
-    add_dependencies(test_AGDnsProxyReapplySettings AGDnsProxy)
+            "-framework NerdDnsProxy -framework Foundation")
+    add_dependencies(test_AGDnsProxyReapplySettings NerdDnsProxy)
     add_dependencies(tests test_AGDnsProxyReapplySettings)
     add_test(AGDnsProxyReapplySettingsTest test_AGDnsProxyReapplySettings)
 
@@ -217,7 +217,7 @@ if("${TARGET_OS}" STREQUAL "macos")
     target_link_libraries(test_AGDnsTunListener
             "-F${CMAKE_CURRENT_BINARY_DIR}"
             "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}"
-            "-framework AGDnsProxy -framework Foundation -framework NetworkExtension")
-    add_dependencies(test_AGDnsTunListener AGDnsProxy)
+            "-framework NerdDnsProxy -framework Foundation -framework NetworkExtension")
+    add_dependencies(test_AGDnsTunListener NerdDnsProxy)
     add_dependencies(tests test_AGDnsTunListener)
 endif()

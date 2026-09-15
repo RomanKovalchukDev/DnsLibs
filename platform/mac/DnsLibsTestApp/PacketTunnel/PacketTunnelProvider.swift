@@ -1,6 +1,6 @@
 import Foundation
 import NetworkExtension
-import AGDnsProxy
+import NerdDnsProxy
 import Network
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
