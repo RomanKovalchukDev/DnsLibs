@@ -8,7 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Added support for hostname addresses in plain DNS upstreams: `dns.adguard.com:53`, `udp://dns.adguard.com:53`, and
+  `tcp://dns.adguard.com:53` now resolve the hostname via the upstream's `bootstrap` servers instead of requiring a literal
+  IP address. (AG-57422)
+
 ### Changed
+
+- Updated NLC to 8.1.49.
+- Updated NLC to 8.1.50 (OpenSSL/BoringSSL bumped to `boring-2026-05-08`).
+- Changed plain DNS upstreams to honor `resolved_server_ip` when it is set, connecting directly to the given IP instead of
+  ignoring it, matching the behavior of DoT, DoH, and DoQ upstreams. (AG-57422)
+- Changed plain DNS upstreams with a hostname address and an empty `bootstrap` list to fail at initialization with an
+  `AE_EMPTY_BOOTSTRAP` error instead of treating the hostname as an address. (AG-57422)
 
 ### Deprecated
 
@@ -16,13 +27,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Fixed slow DNS-over-QUIC connection initialization when the first resolved server address is unreachable (e.g. a dead
+  IPv6 route): the client now replays the QUIC Initial flight on every candidate socket instead of waiting for a PTO
+  retransmission timeout (~500 ms). (AdguardTeam/DnsLibs#283)
+
 ### Security
+
+## [2.10.1] - 2026-08-04
+
+### Changed
+
+- The ClientHello of every encrypted upstream — DNS-over-TLS, DNS-over-HTTPS (both HTTP/2 and
+  HTTP/3) and DNS-over-QUIC — is now built by NativeLibsCommon's `ag::tls::make_ssl()` with the
+  `CHROME` profile, so it reproduces Chrome 150's TLS fingerprint.
+- Fixed `$badfilter` rules not applying to rules from other filters. (AdguardTeam/DnsLibs#284)
+- Updated NLC to 8.1.48.
+
+## [2.10.0] - 2026-07-24
+
+### Added
+
+- Added `adyg`, a standalone dig-like DNS query command-line tool built directly
+  on the `upstream` library.
+    - Supports all existing DNS protocols: plain DNS (UDP/TCP), DNS-over-TLS,
+      DNS-over-HTTPS, DNS-over-QUIC, and DNSCrypt (via `sdns://` stamps).
+    - Dig-compatible options include `+short`, `+trace` (iterative resolution
+      seeded from the IANA root hints), `+dnssec`/`+do`, `+recurse`/`+norecurse`,
+      `+cdflag`/`+cd`, `+subnet=ADDR[/PREFIX]` (EDNS Client Subnet, RFC 7871),
+      `+qr`, `+timeout=N`, `+bootstrap=IP`, `-4` (IPv4 only), `-x addr` (reverse
+      PTR lookup), and the per-section display toggles
+      (`+cmd`/`+comments`/`+question`/`+answer`/`+authority`/`+additional`/
+      `+stats`/`+ttlid`/`+class`, plus `+all`/`+noall`).
+    - See `tools/adyg/`.
+
+### Changed
+
+- The `system://` upstream on Android now returns the reply from `android_res_nsend()`
+  as is, instead of extracting the records from it and assembling a new reply around
+  them: the authority and additional sections, the flags and the response code of the
+  original reply are no longer lost.
+    - `SystemResolver` is now Apple-only. It is a dns-sd (`DNSService`) wrapper, which
+      reports individual records rather than the raw reply, so only Apple needs the
+      reply to be assembled by hand.
+- Updated NLC to 8.1.44.
+- Changed the default `adblock_rules_blocking_mode` from `REFUSED` to `UNSPECIFIED_ADDRESS` for all platforms.
+    - Previously, only Windows used `UNSPECIFIED_ADDRESS` to avoid issues with the system resolver trying other servers and AdGuard VPN blocking those requests.
+    - On other platforms, responding with `REFUSED` caused some applications to endlessly retry blocked requests, leading to increased CPU and battery consumption.
+
+## [2.8.58] - 2026-06-29
+
+### Changed
+
+- Updated NLC to 8.1.38.
+
+## [2.8.57] - 2026-06-25
+
+### Fixed
+
+- Fixed deploy for Windows.
+
+## [2.8.56] - 2026-06-24
+
+- Updated NLC to 8.1.36.
+
+## [2.8.55] - 2026-06-10
+
+### Changed
+
+- Updated ngtcp2 dependency used in DoQ/DoH3.
 
 ## [2.8.54] - 2026-06-08
 
 ### Fixed
 
-- Fixed build on GCC 15.1
+- Fixed build on GCC 15.1.
 
 ## [2.8.53] - 2026-06-04
 
@@ -305,7 +383,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - API change: allow in-memory filters. See `ag::dnsfilter::FilterParams`.
 - Optimistic DNS caching. See `ag::DnsProxySettings::optimistic_cache`.
 
-[Unreleased]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.54...HEAD
+[Unreleased]: https://github.com/AdguardTeam/DnsLibs/compare/v2.10.1...HEAD
+[2.10.1]: https://github.com/AdguardTeam/DnsLibs/compare/v2.10.0...v2.10.1
+[2.10.0]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.58...v2.10.0
+[2.8.58]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.57...v2.8.58
+[2.8.57]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.56...v2.8.57
+[2.8.56]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.55...v2.8.56
+[2.8.55]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.54...v2.8.55
 [2.8.54]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.53...v2.8.54
 [2.8.53]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.52...v2.8.53
 [2.8.52]: https://github.com/AdguardTeam/DnsLibs/compare/v2.8.45...v2.8.52

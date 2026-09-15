@@ -47,6 +47,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(DNS_LIBS_DIR ../../..)
 
+# Resolve the project version (numeric core feeds the Mach-O framework VERSION).
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/version.cmake)
+
 add_compile_options(-fno-strict-aliasing -fno-exceptions -fobjc-abi-version=2)
 add_definitions(-DFMT_EXCEPTIONS=0)
 
@@ -80,7 +83,7 @@ set_property(TARGET NerdDnsProxy PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_target_properties(NerdDnsProxy PROPERTIES
     FRAMEWORK TRUE
     FRAMEWORK_VERSION A
-    VERSION 2.8.53
+    VERSION ${DNS_LIBS_VERSION_CORE}
     MACOSX_FRAMEWORK_INFO_PLIST "${INFOPLIST_FILE}"
     # MACOSX_FRAMEWORK_IDENTIFIER ca.cira.dnsfirewall.dnsproxy
     XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application: Canadian Internet Registration Authority (RJLNUGZH8C)"

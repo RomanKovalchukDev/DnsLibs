@@ -1,6 +1,6 @@
 from conan import ConanFile
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
-from conan.tools.files import patch, copy
+from conan.tools.files import patch, copy, update_conandata
 from conan.tools.scm import Git
 from os.path import join
 import re, os, shutil
@@ -39,14 +39,14 @@ class DnsLibsConan(ConanFile):
         self.requires("klib/2021-04-06@adguard/oss", transitive_headers=True)
         self.requires("ldns/2024-06-20@adguard/oss", transitive_headers=True)
         self.requires("magic_enum/0.9.5", transitive_headers=True)
-        self.requires("native_libs_common/v8.1.33-cira1@adguard_team/native_libs_common", transitive_headers=True)
-        self.requires("ngtcp2/1.0.1@adguard/oss", transitive_headers=True)
+        self.requires("native_libs_common/v8.1.50-cira1@adguard_team/native_libs_common", transitive_headers=True)
+        self.requires("ngtcp2/1.22.1@adguard/oss", transitive_headers=True)
         self.requires("pcre2/10.37@adguard/oss", transitive_headers=True)
         self.requires("tldregistry/2022-12-26@adguard/oss", transitive_headers=True)
         if "mips" in str(self.settings.arch):
             self.requires("openssl/3.1.5-quic1@adguard/oss", transitive_headers=True, force=True)
         else:
-            self.requires("openssl/boring-2024-09-13@adguard/oss", transitive_headers=True)
+            self.requires("openssl/boring-2026-05-08@adguard/oss", transitive_headers=True)
         self.requires("ada/2.7.4", transitive_headers=True)
         if self.settings.os == "Windows":
             self.requires("detours/2021-04-14@adguard/oss", transitive_headers=True)
@@ -64,6 +64,16 @@ class DnsLibsConan(ConanFile):
         if self.settings.os == "Windows":
             del self.options.fPIC
 
+    def export(self):
+        # The exported sources carry no .git, so the build's git describe would
+        # fall back to 0.0.0-git for "local" exports. Capture the describe version
+        # now (the recipe folder still has .git) into conandata.yml for generate()
+        # to feed back into cmake/version.cmake.
+        if self.version == "local":
+            described = self._git_described_version(Git(self))
+            if described:
+                update_conandata(self, {"local_version": described})
+
     def export_sources(self):
         if self.version == "local":
             git = Git(self)
@@ -73,18 +83,54 @@ class DnsLibsConan(ConanFile):
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(i, dst)
 
+    @staticmethod
+    def _git_described_version(git):
+        # Quote the glob: Git.run executes through a shell, so an unquoted "v*"
+        # would expand against files in the recipe dir and match no tags.
+        try:
+            described = git.run('describe --tags --match "v*"').strip()
+        except Exception:
+            return ""
+        return described[1:] if described.startswith("v") else described
+
     def source(self):
         if os.listdir(self.source_folder):
             return
 
         git = Git(self)
-        git.fetch_commit(self.vcs_url, f"v{self.version}")
+        version = str(self.version)
+        # A "git describe" snapshot version looks like "<tag>-<n>-g<rev>"; check
+        # out the commit after "-g". A plain release version is the "v<version>"
+        # tag. fetch_commit can't fetch an abbreviated rev (GitHub rejects it),
+        # so snapshots clone the repo and check the commit out locally.
+        described = re.search(r"-g([0-9a-f]+)$", version)
+        if described:
+            git.clone(url=self.vcs_url, target=".")
+            git.checkout(described.group(1))
+        else:
+            git.fetch_commit(self.vcs_url, f"v{version}")
 
     def generate(self):
         deps = CMakeDeps(self)
         deps.generate()
         tc = CMakeToolchain(self)
         tc.cache_variables["DNSLIBS_ENABLE_TCPIP"] = self.info.options.tcpip
+        # Drive cmake/version.cmake from the package version so the conan source
+        # (fetched by tag, no .git for git describe) bakes the right version into
+        # the generated version.h. For "local" exports the describe version was
+        # stapled into conandata.yml at export time.
+        version = str(self.version)
+        if version == "local":
+            version = (self.conan_data or {}).get("local_version") or version
+        if version and version != "local":
+            tc.cache_variables["DNS_LIBS_VERSION"] = version
+        # Do not write CMakeUserPresets.json into the source tree. Builds are
+        # driven by the presets in CMakePresets.json (see the Makefile), and the
+        # generated file only gets in the way: it adds one include per build
+        # directory, so two directories with the same build type yield two
+        # presets both named `conan-<build type>` and CMake then refuses to read
+        # the file at all.
+        tc.user_presets_path = False
         tc.generate()
 
     def layout(self):
@@ -108,6 +154,10 @@ class DnsLibsConan(ConanFile):
 
         for m in MODULES:
             copy(self, "*.h", src=join(self.source_folder, "%s/include" % m), dst=join(self.package_folder, "include"), keep_path = True)
+
+        # version.h is generated (the source ships only version.h.in,
+        # which the *.h glob above does not match); ship the baked copy.
+        copy(self, "dns/common/version.h", src=join(self.build_folder, "common/gen"), dst=join(self.package_folder, "include"), keep_path=True)
 
         copy(self, "*.dll", src=self.build_folder, dst=join(self.package_folder, "bin"), keep_path=False)
         copy(self, "*.lib", src=self.build_folder, dst=join(self.package_folder, "lib"), keep_path=False)

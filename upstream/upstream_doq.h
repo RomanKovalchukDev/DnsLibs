@@ -190,7 +190,6 @@ private:
     static void on_socket_close(void *arg, Error<SocketError> error);
 
     int init_quic_conn(const Socket *connected_socket);
-    int init_ssl_ctx();
     int init_ssl();
     int on_write();
     int write_streams();
@@ -226,7 +225,15 @@ private:
     size_t m_max_pktlen;
     uint32_t m_quic_version;
     Buffer m_send_buf;
-    ag::UniquePtr<SSL_CTX, &SSL_CTX_free> m_ssl_ctx;
+    /// Cached Initial-level datagrams (the ClientHello flight) so that a socket
+    /// connecting after the first one can immediately replay the flight instead
+    /// of waiting for a PTO retransmission when the first address is
+    /// unreachable (e.g. a host with a dead IPv6 route). Cleared as soon as any
+    /// server packet is processed (or on disconnect/reinit).
+    std::vector<Uint8Vector> m_initial_flight;
+    /// True while the Initial flight is still awaiting the server's first
+    /// response; gates caching of Initial packets in `write_streams()`.
+    bool m_initial_flight_pending = false;
     ag::UniquePtr<SSL, &SSL_free> m_ssl;
     ngtcp2_conn *m_conn{nullptr};
     Crypto m_crypto[3];

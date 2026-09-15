@@ -3,14 +3,67 @@
 #include <gtest/gtest.h>
 #include <ldns/ldns.h>
 #include <magic_enum/magic_enum.hpp>
+#include <mutex>
 #include <thread>
 
+#include "common/parallel.h"
 #include "dns/proxy/dnsproxy.h"
 #include "dns/upstream/upstream.h"
+#include "dns_test_helpers.h"
+#include "loopback_dns_server.h"
+#include "loopback_quic_server.h"
+#include "test_certificates.h"
 
 namespace ag::dns::proxy::test {
 
 using namespace std::chrono_literals;
+
+// Build a wire-format A query for `name` into an ldns buffer. Returns nullptr
+// if any ldns step fails (dname parse, query construction, buffer allocation,
+// or wire encoding) so callers ASSERT() rather than dereference a null pointer
+// inside ldns. The dname is freed on the ldns_pkt_query_new failure path —
+// ldns_pkt_query_new adopts the dname only on success — mirroring make_query()
+// in adyg_cli_packet.cpp and the AGENTS.md C-FFI RAII guideline.
+static ldns_buffer_ptr make_wire_a_query_buffer(const char *name) {
+    ldns_rdf *dname = ldns_dname_new_frm_str(name);
+    if (dname == nullptr) {
+        return {nullptr};
+    }
+    ldns_pkt_ptr pkt{ldns_pkt_query_new(dname, LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD)};
+    if (pkt == nullptr) {
+        // ldns_pkt_query_new did not consume `dname` on failure.
+        ldns_rdf_deep_free(dname);
+        return {nullptr};
+    }
+    ldns_buffer_ptr buffer{ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY)};
+    if (buffer == nullptr) {
+        return {nullptr};
+    }
+    if (ldns_pkt2buffer_wire(buffer.get(), pkt.get()) != LDNS_STATUS_OK) {
+        return {nullptr};
+    }
+    return buffer;
+}
+
+// Build a parsed ldns_pkt query for `name`. Returns nullptr if any ldns step
+// fails (dname parse, query construction) so callers skip the iteration rather
+// than dereference a null pointer inside ldns_pkt_set_id /
+// ldns_rdf2buffer_str / the exchange. The dname is freed on the
+// ldns_pkt_query_new failure path — ldns_pkt_query_new adopts the dname only
+// on success — mirroring make_wire_a_query_buffer above, make_query() in
+// adyg_cli_packet.cpp, and the AGENTS.md C-FFI RAII guideline.
+static ldns_pkt_ptr make_test_query_pkt(const char *name, ldns_rr_type type, bool recurse) {
+    ldns_rdf *dname = ldns_dname_new_frm_str(name);
+    if (dname == nullptr) {
+        return {nullptr};
+    }
+    ldns_pkt *pkt = ldns_pkt_query_new(dname, type, LDNS_RR_CLASS_IN, recurse ? LDNS_RD : 0);
+    if (pkt == nullptr) {
+        ldns_rdf_deep_free(dname);
+        return {nullptr};
+    }
+    return ldns_pkt_ptr(pkt);
+}
 
 struct TestParams {
     ListenerSettings settings;
@@ -32,13 +85,32 @@ TEST_P(ListenerTest, ListensAndResponds) {
     std::condition_variable proxy_cond;
     std::atomic_bool proxy_initialized{false};
     std::atomic_bool proxy_init_result{false};
+    // Filled in by the proxy thread with the OS-assigned (ephemeral) port the
+    // listener actually bound to, so the client threads can dial the resolver
+    // without relying on a fixed port (which would collide under parallel
+    // ctest). init() writes the resolved port back into the listener settings.
+    std::atomic<uint16_t> resolved_port{0};
 
     const auto &params = GetParam();
     const auto listener_settings = params.settings;
 
+    // A loopback upstream the proxy forwards to instead of a real public DNS
+    // server. With block_ipv6 enabled below the proxy short-circuits AAAA
+    // queries and never actually contacts it, but wiring a real offline
+    // upstream keeps the test internet-free even if that behavior changes.
+    ag::test::LoopbackDnsServer upstream_server([](const ldns_pkt &req) -> ldns_pkt_ptr {
+        ldns_pkt_ptr reply = ag::test::make_base_reply(req);
+        const ldns_rr *question = ldns_rr_list_rr(ldns_pkt_question(&req), 0);
+        if (question != nullptr) {
+            ag::test::add_a_answer(reply.get(), question);
+        }
+        return reply;
+    });
+    upstream_server.start();
+
     std::thread t([&]() {
         auto settings = DnsProxySettings::get_default();
-        settings.upstreams = {{"94.140.14.140"}};
+        settings.upstreams = {{.address = upstream_server.address(ag::utils::TP_UDP)}};
         settings.listeners = {listener_settings};
 
         // Since we do an AAAA query, this will prevent the proxy
@@ -49,6 +121,11 @@ TEST_P(ListenerTest, ListensAndResponds) {
         DnsProxy proxy;
         auto [ret, err] = proxy.init(settings, {});
         proxy_init_result = ret;
+        if (ret) {
+            // init() rewrote the port-0 listener's port to the OS-assigned
+            // ephemeral port; expose it to the client threads.
+            resolved_port = proxy.get_settings().listeners[0].port;
+        }
         proxy_initialized = true;
         proxy_cond.notify_all();
         if (!proxy_init_result) {
@@ -105,10 +182,9 @@ TEST_P(ListenerTest, ListensAndResponds) {
     std::vector<Worker> workers;
 
     const auto address = fmt::format("{}[{}]:{}", listener_settings.protocol == ag::utils::TP_TCP ? "tcp://" : "",
-            params.request_addr, listener_settings.port);
+            params.request_addr, resolved_port.load());
 
     for (size_t i = 0; i < params.n_threads; ++i) {
-        std::this_thread::sleep_for(10ms);
         EventLoopPtr loop = EventLoop::create();
         Worker worker{loop,
                 coro::to_future([](std::atomic_long &successful_requests, ListenerSettings listener_settings,
@@ -126,8 +202,13 @@ TEST_P(ListenerTest, ListensAndResponds) {
                     }
 
                     for (size_t j = 0; j < params.requests_per_thread; ++j) {
-                        ldns_pkt_ptr req(ldns_pkt_query_new(
-                                ldns_dname_new_frm_str(params.query), LDNS_RR_TYPE_AAAA, LDNS_RR_CLASS_IN, LDNS_RD));
+                        ldns_pkt_ptr req = make_test_query_pkt(params.query, LDNS_RR_TYPE_AAAA, true);
+                        if (req == nullptr) {
+                            // Skip this iteration rather than dereference a null
+                            // ldns handle inside ldns_pkt_set_id (or the exchange)
+                            // if dname parsing or query construction failed.
+                            continue;
+                        }
                         ldns_pkt_set_id(req.get(), ++request_id);
 
                         auto res = co_await upstream_res.value()->exchange(req.get());
@@ -142,9 +223,9 @@ TEST_P(ListenerTest, ListensAndResponds) {
                                 && (!ldns_pkt_tc(resp.get()) || listener_settings.protocol == ag::utils::TP_UDP)) {
                             ++successful_requests;
                         } else {
-                            char *str = ldns_pkt2str(resp.get());
-                            errlog(logger, "[id={}] Invalid response:\n{}", ldns_pkt_id(req.get()), str);
-                            std::free(str); // NOLINT(cppcoreguidelines-no-malloc,hicpp-no-malloc)
+                            AllocatedPtr<char> str{ldns_pkt2str(resp.get())};
+                            errlog(logger, "[id={}] Invalid response:\n{}", ldns_pkt_id(req.get()),
+                                    (str != nullptr) ? str.get() : "");
                         }
                     }
                 }(successful_requests, listener_settings, address, i, params, loop))};
@@ -166,7 +247,7 @@ TEST(ListenerTest, ShutsDownIfCouldNotInitialize) {
     constexpr auto port = 1;
     DnsProxy proxy;
     auto proxy_settings = DnsProxySettings::get_default();
-    proxy_settings.upstreams = {{"94.140.14.140"}};
+    proxy_settings.upstreams = {{"127.0.0.1"}};
     proxy_settings.listeners = {
             {addr, port, ag::utils::TP_UDP},
             {addr, port, ag::utils::TP_TCP},
@@ -175,55 +256,99 @@ TEST(ListenerTest, ShutsDownIfCouldNotInitialize) {
     ASSERT_FALSE(ret);
 }
 
-TEST(ListenerTest, DISABLED_ManyRequestsPending) {
-    Logger::set_log_level(LogLevel::LOG_LEVEL_TRACE);
-    FILE *logfile = fopen("adguard.log", "w");
-    ASSERT_TRUE(logfile) << "Failed to open adguard.log for writing: " << strerror(errno);
-    Logger::LogToFile l(logfile);
-    Logger::set_callback(l);
+// Many pending requests against a local DoQ upstream. The proxy forwards 1 000
+// fire-and-forget queries through a LoopbackQuicServer (DoQ mode) and a final
+// query whose reply is checked. Fully offline: the server is bound to
+// 127.0.0.1 (literal IP, bootstrapper bypassed), and
+// on_certificate_verification accepts the loopback self-signed cert.
+// Previously DISABLED_ and gated because it dialed quic://dns.adguard-dns.com;
+// now un-disabled and ungated since it's deterministic and offline.
+TEST(ListenerTest, ManyRequestsPending) {
+    // Local DoQ upstream returning a canned A reply for any query.
+    ag::test::LoopbackQuicServer upstream_server([](const ldns_pkt &req) -> ldns_pkt_ptr {
+        ldns_pkt_ptr reply = ag::test::make_base_reply(req);
+        const ldns_rr *question = ldns_rr_list_rr(ldns_pkt_question(&req), 0);
+        if (question != nullptr) {
+            ag::test::add_a_answer(reply.get(), question);
+        }
+        return reply;
+    });
+    upstream_server.start();
+
     bool proxy_init_result = false;
     std::mutex mtx;
     std::condition_variable proxy_cond;
     bool proxy_initialized = false;
 
     constexpr auto address = "::";
-    constexpr auto port = 5321;
+    // Port 0 (ephemeral): the 1k-request storm below goes through the
+    // in-process handle_message() path, which bypasses the listener, so no
+    // client ever dials this port; binding an ephemeral port keeps the test
+    // parallel-safe alongside the other listener tests.
+    constexpr auto port = 0;
     DnsProxy proxy;
     std::thread proxy_thread([&]() {
         auto proxy_settings = DnsProxySettings::get_default();
 
         proxy_settings.listeners = {{address, port, ag::utils::TP_UDP}};
-        proxy_settings.upstreams = {{.address = "quic://dns.adguard-dns.com", .bootstrap = {"1.1.1.1"}}};
-        proxy_settings.upstream_timeout = 3s;
+        // Literal-IP loopback address: bootstrapper is bypassed, DoqUpstream
+        // connects directly to the in-process QUIC server.
+        proxy_settings.upstreams = {{.address = upstream_server.address()}};
+        proxy_settings.upstream_timeout = 5s;
         proxy_settings.enable_http3 = true;
         proxy_settings.dns_cache_size = 0;
         proxy_settings.optimistic_cache = false;
 
-        auto [ret, err] = proxy.init(proxy_settings, {});
-        proxy_init_result = ret;
-        proxy_initialized = true;
+        // Accept the loopback server's self-signed certificate.
+        DnsProxyEvents events;
+        events.on_certificate_verification = [](CertificateVerificationEvent) -> std::optional<std::string> {
+            return std::nullopt;
+        };
+        auto [ret, err] = proxy.init(proxy_settings, std::move(events));
+        // Set the shared init result / initialized flag under the same mutex the
+        // waits use, to avoid a data race and missed wakeups.
+        {
+            std::lock_guard<std::mutex> l(mtx);
+            proxy_init_result = ret;
+            proxy_initialized = true;
+        }
+        proxy_cond.notify_all();
 
-        ldns_pkt_ptr reqpkt(
-                ldns_pkt_query_new(ldns_dname_new_frm_str("youtube.com"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD));
-
-        ldns_buffer_ptr buffer{ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY)};
-        ldns_pkt2buffer_wire(buffer.get(), reqpkt.get());
-
-        ag::coro::run_detached([&buffer](DnsProxy &proxy) -> ag::coro::Task<void> {
-            co_await proxy.handle_message(
-                    {ldns_buffer_at(buffer.get(), 0), ldns_buffer_position(buffer.get())}, nullptr);
-        }(proxy));
-
-        ldns_pkt_ptr reqpkt2(
-                ldns_pkt_query_new(ldns_dname_new_frm_str("vk.com"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD));
-
-        buffer.reset(ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY));
-        ldns_pkt2buffer_wire(buffer.get(), reqpkt2.get());
-
-        ag::coro::run_detached([&buffer](DnsProxy &proxy) -> ag::coro::Task<void> {
-            co_await proxy.handle_message(
-                    {ldns_buffer_at(buffer.get(), 0), ldns_buffer_position(buffer.get())}, nullptr);
-        }(proxy));
+        // Seed two fire-and-forget queries so there are in-flight requests
+        // when the main thread launches the 1 000-query storm below.
+        //
+        // handle_message is a coroutine: it captures its Uint8View argument,
+        // suspends on `co_await m_loop->co_submit()` and only reads the view
+        // later on the event loop thread. coro::run_detached() resumes the
+        // coroutine synchronously up to that first suspension, so the view
+        // must stay valid until handle_message finishes. The original test
+        // reused one stack-local ldns_buffer and reset it between the two
+        // requests, freeing the data the suspended handle_message still
+        // referenced — a heap-use-after-free caught by ASan.
+        //
+        // The wire data is therefore moved into the coroutine itself as a
+        // by-value parameter. Coroutine parameters live in the heap-allocated
+        // coroutine frame and are destroyed only when the coroutine finishes,
+        // so the Uint8View into that data stays valid across the suspension.
+        // (Capturing the buffer in the *lambda* would not work: a lambda
+        // coroutine's captures live in the temporary closure object, which is
+        // destroyed as soon as run_detached() returns — dangling the data the
+        // still-suspended handle_message references.)
+        auto fire_forget = [](DnsProxy &proxy, const char *name) {
+            ldns_buffer_ptr buf = make_wire_a_query_buffer(name);
+            if (buf == nullptr) {
+                // Skip this seed query rather than dereferencing a null ldns
+                // handle inside ldns_pkt2buffer_wire if construction failed.
+                return;
+            }
+            const uint8_t *base = ldns_buffer_at(buf.get(), 0);
+            Uint8Vector data{base, base + ldns_buffer_position(buf.get())};
+            ag::coro::run_detached([](DnsProxy &proxy, Uint8Vector data) -> ag::coro::Task<void> {
+                co_await proxy.handle_message(Uint8View{data.data(), data.size()}, nullptr);
+            }(proxy, std::move(data)));
+        };
+        fire_forget(proxy, "youtube.com");
+        fire_forget(proxy, "vk.com");
 
         // Wait until stopped
         {
@@ -234,53 +359,100 @@ TEST(ListenerTest, DISABLED_ManyRequestsPending) {
         }
     });
 
-    std::this_thread::sleep_for(2s);
-    ASSERT_TRUE(proxy_init_result);
-    ldns_pkt_ptr reqpkt(ldns_pkt_query_new(ldns_dname_new_frm_str("g.co"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD));
-    ldns_buffer_ptr buffer{ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY)};
-    ldns_pkt2buffer_wire(buffer.get(), reqpkt.get());
-
-    for (int i = 0; i < 10000; i++) {
-        coro::run_detached([&buffer](auto &proxy) -> coro::Task<void> {
-            co_await proxy.handle_message(
-                    {ldns_buffer_at(buffer.get(), 0), ldns_buffer_position(buffer.get())}, nullptr);
-        }(proxy));
+    // Wait until the proxy is initialized (replaces a fixed 2 s sleep). Capture
+    // the init result under the same lock so the assertion below reads a value
+    // free of data races (rather than reading the shared flag unlocked).
+    bool proxy_init_result_local = false;
+    {
+        std::unique_lock<std::mutex> l(mtx);
+        proxy_cond.wait(l, [&]() {
+            return proxy_initialized;
+        });
+        proxy_init_result_local = proxy_init_result;
     }
-    std::this_thread::sleep_for(10s);
+    ASSERT_TRUE(proxy_init_result_local);
 
-    // send new request after requests storm
-    ldns_pkt_ptr reqpkt2(
-            ldns_pkt_query_new(ldns_dname_new_frm_str("google.com"), LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD));
+    ldns_buffer_ptr buffer = make_wire_a_query_buffer("g.co");
+    ASSERT_NE(nullptr, buffer.get());
 
-    buffer.reset(ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY));
-    ldns_pkt2buffer_wire(buffer.get(), reqpkt2.get());
+    // Launch the "many pending" storm as fire-and-forget coroutines, awaited
+    // via an atomic counter + condition_variable barrier instead of sleep().
+    // Pass buffer/counter/cv as parameters, not captures.
+    //
+    // Capped at 1 000 (not higher) on purpose: each fire-and-forget query is
+    // forwarded to the DoQ upstream, and the storm's QUIC source ports plus the
+    // other listener tests' ephemeral ports can otherwise exhaust the platform's
+    // ephemeral port range (macOS: ~16 000 ports), which then makes the *next*
+    // test's LoopbackDnsServer TCP bind(0) fail with EADDRINUSE. 1 000 still
+    // exercises hundreds of concurrent in-flight handle_message coroutines
+    // (the regression this test guards against) without saturating the port
+    // range.
+    constexpr int TOTAL_REQUESTS = 1000;
+    std::mutex storm_mtx;
+    std::condition_variable storm_cv;
+    std::atomic<int> storm_pending{TOTAL_REQUESTS};
 
-    Uint8Vector last_reply_res{};
-    ag::coro::run_detached([&buffer](DnsProxy &proxy, Uint8Vector &reply_res) -> ag::coro::Task<void> {
-        reply_res = co_await proxy.handle_message(
-                {ldns_buffer_at(buffer.get(), 0), ldns_buffer_position(buffer.get())}, nullptr);
-    }(proxy, last_reply_res));
-    std::this_thread::sleep_for(3s);
+    for (int i = 0; i < TOTAL_REQUESTS; ++i) {
+        ag::coro::run_detached([](DnsProxy &proxy, ldns_buffer *buffer, std::atomic<int> &pending,
+                                       std::condition_variable &cv) -> ag::coro::Task<void> {
+            co_await proxy.handle_message({ldns_buffer_at(buffer, 0), ldns_buffer_position(buffer)}, nullptr);
+            if (pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                cv.notify_one();
+            }
+            co_return;
+        }(proxy, buffer.get(), std::ref(storm_pending), std::ref(storm_cv)));
+    }
+
+    // Bounded wait: a regression that never completes surfaces as an
+    // ASSERT failure here instead of hanging the test binary. The predicate
+    // guards against lost wakeups: the last worker sets pending to 0 before
+    // calling notify_one(), so a notify that races ahead of the wait is still
+    // observed via the re-checked predicate on entry.
+    {
+        std::unique_lock<std::mutex> lk(storm_mtx);
+        storm_cv.wait_for(lk, 30s, [&] {
+            return storm_pending.load() == 0;
+        });
+    }
+    ASSERT_EQ(storm_pending.load(), 0) << "not all " << TOTAL_REQUESTS << " storm requests completed in time";
+
+    // Send a new request after the storm and await its result directly instead
+    // of sleeping for a fixed 3 s. This is race-free: the storm above has
+    // fully resolved before the buffer is reused.
+    buffer = make_wire_a_query_buffer("google.com");
+    ASSERT_NE(nullptr, buffer.get());
+
+    // Pass `buffer` as a by-value parameter, not a capture.
+    Uint8Vector last_reply_res = coro::to_future([](DnsProxy &proxy, ldns_buffer *buffer) -> coro::Task<Uint8Vector> {
+        co_return co_await proxy.handle_message({ldns_buffer_at(buffer, 0), ldns_buffer_position(buffer)}, nullptr);
+    }(proxy, buffer.get()))
+                                         .get();
 
     // check if last request got correct response
     ASSERT_FALSE(last_reply_res.empty());
-    ldns_pkt *reply_pkt = nullptr;
-    auto status = ldns_wire2pkt(&reply_pkt, last_reply_res.data(), last_reply_res.size());
+    ldns_pkt *raw = nullptr;
+    auto status = ldns_wire2pkt(&raw, last_reply_res.data(), last_reply_res.size());
+    ldns_pkt_ptr reply_pkt{raw};
     ASSERT_EQ(LDNS_STATUS_OK, status) << ldns_get_errorstr_by_id(status);
-    ldns_pkt_free(reply_pkt);
 
-    proxy_initialized = false;
+    // Signal the proxy thread to stop. Guard the shared flag with the same mutex
+    // its wait predicate reads under, then notify.
+    {
+        std::lock_guard<std::mutex> l(mtx);
+        proxy_initialized = false;
+    }
     proxy_cond.notify_one();
     proxy.deinit();
     proxy_thread.join();
+    upstream_server.stop();
 }
 
 INSTANTIATE_TEST_SUITE_P(ListenerLogic, ListenerTest,
-        ::testing::Values(TestParams{ListenerSettings{.address = "::1", .port = 1234, .protocol = ag::utils::TP_UDP}},
+        ::testing::Values(TestParams{ListenerSettings{.address = "::1", .port = 0, .protocol = ag::utils::TP_UDP}},
                 TestParams{ListenerSettings{
-                        .address = "::1", .port = 1234, .protocol = ag::utils::TP_TCP, .persistent = false}},
+                        .address = "::1", .port = 0, .protocol = ag::utils::TP_TCP, .persistent = false}},
                 TestParams{ListenerSettings{.address = "::1",
-                        .port = 1234,
+                        .port = 0,
                         .protocol = ag::utils::TP_TCP,
                         .persistent = true,
                         .idle_timeout = 1000ms}}),

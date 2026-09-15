@@ -12,5 +12,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("Copyright © Adguard Software Ltd 2009-2024")]
 [assembly: AssemblyTrademark("Copyright © Adguard Software Ltd 2024")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("2.8.53")]
-[assembly: AssemblyFileVersion("2.8.53")]
+// The version attributes (AssemblyVersion / AssemblyFileVersion /
+// AssemblyInformationalVersion) are emitted into a generated, git-ignored
+// VersionInfo.cs by Directory.Build.targets at build time. Set DnsLibsVersion
+// (or the DNS_LIBS_VERSION env var) to override the git-describe default.

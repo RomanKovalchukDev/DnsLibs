@@ -1,0 +1,296 @@
+name: Publish release
+
+# Runs in the private repo once a release-bump PR (from prepare-release.yml) is
+# merged, or on manual dispatch. It:
+#   1. Reads the released version from CHANGELOG.md and creates the v{version}
+#      tag (tag-from-changelog.yml).
+#   2. Resolves the version and the originating Build run from that tag.
+#   3. Deploys the pre-built Android, Apple and Windows artifacts to Artifactory.
+#   4. Exports and uploads the Conan recipes to Artifactory.
+#   5. Builds, signs and notarizes the `adyg` CLI tool for every platform
+#      (build-adyg.yml) and attaches the archives to the GitHub Release.
+#
+# The GitHub Release itself is created in the public mirror (AdguardTeam/DnsLibs):
+# this is a private repository. The library binaries live in Artifactory /
+# Artifact Keeper; only the adyg archives are attached as release assets.
+
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref to publish manually
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+  id-token: write
+  pull-requests: read
+
+jobs:
+  # 1. Read the released version from CHANGELOG.md and create the v{version} tag.
+  tag:
+    uses: AdGuardSoftwareLimited/actions/.github/workflows/tag-from-changelog.yml@master
+    with:
+      ref: ${{ inputs.ref || github.event.pull_request.merge_commit_sha || github.ref_name }}
+      team: corelibs
+
+  # 2. Resolve the version and locate the Build run that produced the artifacts.
+  # The tag job above created the release tag; the matching Build run (build.yml)
+  # must have produced the versioned artifacts.
+  prepare:
+    name: Prepare deploy
+    needs: tag
+    runs-on: [team-corelibs]
+    outputs:
+      build_run_id: ${{ steps.resolve.outputs.build_run_id }}
+    steps:
+      - name: Resolve build run
+        id: resolve
+        uses: AdGuardSoftwareLimited/native-libs-common/.github/actions/resolve-build-run@master
+        with:
+          tag: ${{ needs.tag.outputs.tag }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          build-workflow: build.yml
+
+  # 3a. Android: re-publish the payload from the Build run into this run, then
+  # hand it to the reusable deploy workflow (which downloads from the current run).
+  android-prepare-payload:
+    name: Deploy library / Android (prepare payload)
+    needs: prepare
+    runs-on: [team-corelibs]
+    steps:
+      - name: Download Android artifactory payload from Build run
+        uses: actions/download-artifact@v8
+        with:
+          name: android-artifactory-payload
+          path: artifactory-payload
+          run-id: ${{ needs.prepare.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-upload payload for deploy-to-ak-maven workflow
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifactory-payload
+          path: artifactory-payload
+          if-no-files-found: error
+          retention-days: 7
+
+  android-deploy:
+    name: Deploy library / Android
+    needs: android-prepare-payload
+    uses: AdGuardSoftwareLimited/actions/.github/workflows/deploy-to-ak-maven.yml@master
+    with:
+      team: corelibs
+      environment: android-artifact-keeper
+      ak-repo: maven-internal
+    secrets: inherit
+
+  # 3b. Apple: re-publish the payloads (xcframework, podspec, SwiftPM) built by
+  # the Build run into this run, so the reusable AK deploy workflows (which
+  # download from the current run) can find them. Each artifact already carries
+  # the exact remote directory layout the deploy workflows expect, so it is
+  # passed through unchanged.
+  apple-prepare-payload:
+    name: Deploy library / Apple (prepare payload)
+    needs: prepare
+    runs-on: [team-corelibs]
+    steps:
+      - name: Download Apple artifacts from Build run
+        uses: actions/download-artifact@v8
+        with:
+          pattern: apple-*
+          path: apple-artifacts
+          run-id: ${{ needs.prepare.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-upload xcframework
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-xcframework
+          path: apple-artifacts/apple-xcframework
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Re-upload podspec
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-podspec
+          path: apple-artifacts/apple-podspec
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Re-upload SwiftPM
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-swiftpm
+          path: apple-artifacts/apple-swiftpm
+          if-no-files-found: error
+          retention-days: 7
+
+  # Publish the xcframework binary first; the podspec and SwiftPM manifest both
+  # reference its download URL, so they deploy only after it exists.
+  apple-deploy-xcframework:
+    name: Deploy library / Apple xcframework
+    needs: apple-prepare-payload
+    uses: AdGuardSoftwareLimited/actions/.github/workflows/deploy-to-ak-generic.yml@master
+    with:
+      team: corelibs
+      artifact-pattern: apple-xcframework
+      ak-repo: apple-bin
+    secrets: inherit
+
+  apple-deploy-podspec:
+    name: Deploy library / Apple podspec
+    needs: apple-deploy-xcframework
+    uses: AdGuardSoftwareLimited/actions/.github/workflows/deploy-to-ak-generic.yml@master
+    with:
+      team: corelibs
+      environment: apple-artifact-keeper-podspec
+      artifact-pattern: apple-podspec
+      ak-repo: pods
+    secrets: inherit
+
+  apple-deploy-swiftpm:
+    name: Deploy library / Apple SwiftPM
+    needs: apple-deploy-xcframework
+    uses: AdGuardSoftwareLimited/actions/.github/workflows/deploy-to-ak-swift.yml@master
+    with:
+      team: corelibs
+      environment: apple-artifact-keeper-swiftpm
+      artifact-pattern: apple-swiftpm
+      ak-repo: swift-pkgs
+    secrets: inherit
+
+  resolve-images:
+    uses: AdGuardSoftwareLimited/native-libs-common/.github/workflows/resolve-images.yml@master
+
+  # 3c. Windows: download the nuget package from the Build run and push it.
+  windows-deploy:
+    name: Deploy library / Windows
+    needs: [prepare, resolve-images]
+    runs-on:
+      - ephemeral
+      - ephemeral-vmwin
+      - ${{ needs.resolve-images.outputs.windows }}
+      - ephemeral-limit-memory-2048
+      - ephemeral-limit-cpu-2
+      - ephemeral-run-id-${{ github.run_id }}
+    environment: windows-artifactory
+    steps:
+      - name: Download nuget package from Build run
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-nupkg
+          path: nupkg
+          run-id: ${{ needs.prepare.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push nuget package to Artifactory
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem -Path nupkg -Filter *.nupkg -Recurse | ForEach-Object {
+            & nuget push $_.FullName `
+              -Source "${{ vars.NUGET_REPO_URL }}" `
+              -ApiKey "${{ secrets.ARTIFACTORY_USER }}:${{ secrets.ARTIFACTORY_API_KEY }}" `
+              -SkipDuplicate
+            if (!$?) { exit 1 }
+          }
+
+  # 4. Export and upload the Conan recipes to Artifactory.
+  conan-deploy:
+    needs: tag
+    environment: conan-artifactory
+    runs-on: team-corelibs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Upload conan recipes
+        uses: AdGuardSoftwareLimited/native-libs-common/.github/actions/upload-conan-recipes@master
+        with:
+          export_script_path: scripts/export_conan.sh
+          conan_repo_url: ${{ vars.CONAN_REPO_URL }}
+          artifactory_user: ${{ secrets.ARTIFACTORY_USER }}
+          artifactory_api_key: ${{ secrets.ARTIFACTORY_API_KEY }}
+
+  # 5. Build the adyg CLI tool for every platform from the release tag, sign and
+  # notarize it, and collect the per-platform archives into the
+  # `release-artifacts` artifact of this run. mirror-and-release (below)
+  # publishes that artifact's files as the GitHub Release assets, so this must
+  # run in the same workflow run as the release job.
+  build-adyg:
+    name: Build adyg
+    needs: tag
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/build-adyg.yml
+    with:
+      ref: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+
+  # 6. Once every platform is published, mirror the tag to the public repository
+  # AdguardTeam/DnsLibs and cut the GitHub Release there. This is a private
+  # repository, so the release is published to the public mirror; mirroring runs
+  # first so the tag exists in the target before the release is created. The
+  # library binaries live in Artifactory / Artifact Keeper and are not attached;
+  # the assets are the adyg archives from the `release-artifacts` artifact built
+  # by the build-adyg job above. Pre-release tags (v...-beta.N, -rc.N) are marked
+  # as pre-releases.
+  mirror-and-release:
+    name: Mirror and create GitHub release
+    needs:
+      - tag
+      - android-deploy
+      - apple-deploy-xcframework
+      - apple-deploy-podspec
+      - apple-deploy-swiftpm
+      - windows-deploy
+      - conan-deploy
+      - build-adyg
+    uses: AdGuardSoftwareLimited/actions/.github/workflows/mirror-and-release.yml@master
+    with:
+      team: corelibs
+      target_repo: AdguardTeam/DnsLibs
+      tag: ${{ needs.tag.outputs.tag }}
+      changelog: ${{ needs.tag.outputs.changelog }}
+      artifact_name: release-artifacts
+      prerelease: ${{ contains(needs.tag.outputs.tag, '-') }}
+    secrets: inherit
+
+  # 6. Open the downstream tracking issues (with the changelog link and the
+  # public, private-stripped changelog) and announce to Slack as one Block Kit
+  # message. announce-release.yml owns all of the issue-creation and Slack
+  # formatting; only the product name, channel and repo/assignee list differ.
+  announce:
+    name: Announce release
+    needs:
+      - tag
+      - mirror-and-release
+    permissions:
+      contents: read
+      id-token: write
+    uses: AdGuardSoftwareLimited/native-libs-common/.github/workflows/announce-release.yml@master
+    with:
+      product: DnsLibs
+      version: ${{ needs.tag.outputs.version }}
+      release_url: ${{ needs.mirror-and-release.outputs.release-url }}
+      changelog: ${{ needs.tag.outputs.changelog }}
+      channel: '#build-corelibs'
+      targets: |
+        [
+          {"repo": "AdguardTeam/AdguardForAndroid", "assignee": "artemiv4nov", "platform": "Android"},
+          {"repo": "AdguardTeam/AdguardForiOS", "assignee": "artemiv4nov", "platform": "iOS"},
+          {"repo": "AdguardTeam/AdguardForMac", "assignee": "vityevato", "platform": "Mac"},
+          {"repo": "AdguardTeam/AdguardForWindows", "assignee": "adbuker", "platform": "Windows"}
+        ]
+      team: corelibs
+    secrets: inherit

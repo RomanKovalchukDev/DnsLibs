@@ -1,4 +1,6 @@
 #include <cassert>
+#include <variant>
+
 #include <magic_enum/magic_enum.hpp>
 #include <openssl/rand.h>
 #include <openssl/x509.h>
@@ -21,6 +23,7 @@
 #pragma optimize("", on)
 #endif
 #include "common/time_utils.h"
+#include "common/tls/make_ssl.h"
 #include "dns/upstream/upstream.h"
 
 #include "upstream_doq.h"
@@ -385,10 +388,6 @@ Error<Upstream::InitError> DoqUpstream::init() {
 
     m_remote_addr_empty = SocketAddress("::", m_port);
 
-    if (int ret = init_ssl_ctx(); ret != 0) {
-        return make_error(InitError::AE_SSL_CONTEXT_INIT_FAILED);
-    }
-
     return {};
 }
 
@@ -407,20 +406,25 @@ coro::Task<Upstream::ExchangeResult> DoqUpstream::exchange(const ldns_pkt *reque
         m_server_addresses.assign(bootstrapper_res.addresses.begin(), bootstrapper_res.addresses.end());
     }
 
-    ldns_buffer *buffer = ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY);
+    // Owned by an RAII guard from creation so the encode-failure co_return below
+    // cannot leak it (ldns_pkt2buffer_wire is the call that can fail between
+    // allocation and the transfer to req.request_buffer).
+    ldns_buffer_ptr buffer{ldns_buffer_new(REQUEST_BUFFER_INITIAL_CAPACITY)};
     uint16_t original_req_id = ldns_pkt_id(request);
-    ldns_status status = ldns_pkt2buffer_wire(buffer, request);
+    // ldns_buffer_new can return nullptr under memory pressure; without this
+    // guard ldns_pkt2buffer_wire would dereference it inside ldns and crash.
+    ldns_status status = (buffer == nullptr) ? LDNS_STATUS_MEM_ERR : ldns_pkt2buffer_wire(buffer.get(), request);
     if (status != LDNS_STATUS_OK) {
         assert(0);
         co_return make_error(DnsError::AE_ENCODE_ERROR, ldns_get_errorstr_by_id(status));
     }
-    ldns_buffer_flip(buffer);
-    memset(ldns_buffer_current(buffer), '\0', sizeof(original_req_id));
+    ldns_buffer_flip(buffer.get());
+    memset(ldns_buffer_current(buffer.get()), '\0', sizeof(original_req_id));
 
     int64_t request_id = m_next_request_id++;
     Request &req = m_requests[request_id];
     req.request_id = request_id;
-    req.request_buffer.reset(buffer);
+    req.request_buffer = std::move(buffer);
     tracelog_id(m_log, request, "Creation new request, id: {}, connection state: {}", request_id,
             magic_enum::enum_name(m_state.load()));
 
@@ -479,7 +483,10 @@ void DoqUpstream::on_socket_connected(void *arg) {
     auto *ctx = (SocketContext *) arg;
     DoqUpstream *self = ctx->upstream;
 
-    const SocketAddress &peer = ctx->socket->get_peer();
+    // Copy the peer: a synchronous UdpSocket::send() failure below can destroy
+    // the socket (via on_socket_close()) before the fail path runs, so a
+    // reference into ctx->socket would dangle.
+    SocketAddress peer = ctx->socket->get_peer();
     tracelog(self->m_log, "{}(): {}", __func__, peer.str());
 
     auto *info = std::get_if<ConnectionHandshakeInitialInfo>(&self->m_conn_state.info);
@@ -497,19 +504,44 @@ void DoqUpstream::on_socket_connected(void *arg) {
     }
 
     info->last_connected_socket = ctx;
+    // Multi-address Happy Eyeballs: when the Initial flight was already written
+    // on an earlier socket and the server has not responded yet, replay the
+    // cached flight on this newly connected socket. Otherwise a dead first
+    // address (e.g. an IPv6 black hole) costs a full PTO (~500ms) before a
+    // working address is tried.
+    bool had_initial_flight = !self->m_initial_flight.empty();
     if (int r = self->on_write(); r != NETWORK_ERR_OK) {
         dbglog(self->m_log, "Failed to send packet to {}: {}", peer.str(), r);
         goto fail;
+    }
+    if (had_initial_flight) {
+        for (const auto &pkt : self->m_initial_flight) {
+            if (int r = self->send_packet(ctx->socket.get(), Uint8View(pkt.data(), pkt.size())); r != NETWORK_ERR_OK) {
+                dbglog(self->m_log, "Failed to replay initial flight to {}: {}", peer.str(), r);
+                goto fail;
+            }
+        }
     }
 
     return;
 
 fail:
+    // UdpSocket::send() can fail synchronously: on error it invokes
+    // on_socket_close() before returning, which may extract (and destroy) `ctx`
+    // and even call disconnect() (invalidating the `info` captured above).
+    // Revalidate the connection state before touching either.
+    auto *cur_info = std::get_if<ConnectionHandshakeInitialInfo>(&self->m_conn_state.info);
+    if (cur_info == nullptr) {
+        return; // Already disconnected by the synchronous on_socket_close().
+    }
+    auto dropped = self->m_conn_state.extract_socket(ctx);
+    if (dropped == nullptr) {
+        return; // ctx was already extracted by the synchronous on_socket_close().
+    }
     self->disqualify_server_address(peer);
-    auto drop = self->m_conn_state.extract_socket(ctx);
     // if the peer is not yet selected and we have some pending endpoints,
     // do not disconnect immediately - wait for other ones
-    if (info->sockets.empty()) {
+    if (cur_info->sockets.empty()) {
         self->disconnect("Failed to handshake with any peer");
     }
 }
@@ -591,13 +623,43 @@ void DoqUpstream::on_socket_close(void *arg, Error<SocketError> error) {
         self->m_fatal_error = nullptr;
     }
 
-    auto drop = self->m_conn_state.extract_socket(ctx);
-    // if the peer is not yet selected and we have some pending endpoints,
-    // do not disconnect immediately - wait for other ones
-    if (const ConnectionHandshakeInitialInfo *info; self->m_conn_state.is_peer_selected()
-            || nullptr == (info = std::get_if<ConnectionHandshakeInitialInfo>(&self->m_conn_state.info))
-            || info->sockets.empty()) {
+    auto dropped = self->m_conn_state.extract_socket(ctx);
+
+    // An established connection is torn down by any socket close.
+    if (self->m_conn_state.is_peer_selected()) {
         self->disconnect("Connection is closed");
+        return;
+    }
+
+    auto *info = std::get_if<ConnectionHandshakeInitialInfo>(&self->m_conn_state.info);
+    if (info == nullptr) {
+        // Already disconnected (e.g. by a synchronous failure in a nested call).
+        return;
+    }
+
+    if (info->sockets.empty()) {
+        // No candidates left; tear down so the exchange fails instead of hanging.
+        self->disconnect("Connection is closed");
+        return;
+    }
+
+    // Handshake phase with surviving candidates. If the closed socket was the
+    // one carrying the Initial flight (extract_socket cleared
+    // last_connected_socket), promote a surviving candidate and replay the
+    // cached flight on it; otherwise retransmissions would have no socket to
+    // send on (send_packet() would assert) and the handshake would wait for
+    // the timeout instead of falling back.
+    if (info->last_connected_socket == nullptr) {
+        info->last_connected_socket = info->sockets.front().get();
+        for (const auto &pkt : self->m_initial_flight) {
+            if (int r = self->send_packet(info->last_connected_socket->socket.get(), Uint8View(pkt.data(), pkt.size()));
+                    r != NETWORK_ERR_OK) {
+                // A synchronous send failure re-enters on_socket_close() for the
+                // promoted socket, which performs the extraction/teardown; do
+                // not touch `info` afterwards.
+                return;
+            }
+        }
     }
 }
 
@@ -730,6 +792,11 @@ int DoqUpstream::write_streams() {
         }
 
         m_send_buf.push(nwrite);
+        if (m_initial_flight_pending) {
+            // Keep the Initial datagrams for multi-address replay; the buffer
+            // is reset by send_packet() below, so copy the bytes first.
+            m_initial_flight.emplace_back(m_send_buf.rpos(), m_send_buf.rpos() + nwrite);
+        }
 
         if (auto rv = send_packet(); rv != NETWORK_ERR_OK) {
             return rv;
@@ -870,52 +937,7 @@ int DoqUpstream::init_quic_conn(const Socket *connected_socket) {
     return NETWORK_ERR_OK;
 }
 
-int DoqUpstream::init_ssl_ctx() {
-    m_ssl_ctx.reset(SSL_CTX_new(TLS_client_method()));
-    if (m_ssl_ctx == nullptr) {
-        return 1;
-    }
-    SSL_CTX_set_min_proto_version(m_ssl_ctx.get(), TLS1_3_VERSION);
-    SSL_CTX_set_max_proto_version(m_ssl_ctx.get(), TLS1_3_VERSION);
-    SSL_CTX_set_quic_method(m_ssl_ctx.get(), &quic_method);
-    // setup our verifier
-    SSL_CTX_set_verify(m_ssl_ctx.get(), SSL_VERIFY_PEER, nullptr);
-    SSL_CTX_set_cert_verify_callback(m_ssl_ctx.get(), DoqUpstream::ssl_verify_callback, nullptr);
-#ifdef OPENSSL_IS_BORINGSSL
-    SSL_CTX_set_permute_extensions(m_ssl_ctx.get(), true);
-#endif // OPENSSL_IS_BORINGSSL
-    TlsSessionCache::prepare_ssl_ctx(m_ssl_ctx.get());
-    return 0;
-}
-
 int DoqUpstream::init_ssl() {
-    m_ssl.reset(SSL_new(m_ssl_ctx.get()));
-    if (m_ssl == nullptr) {
-        return 1;
-    }
-    SSL_set_app_data(m_ssl.get(), this);
-    if (!SocketAddress(m_url.get_hostname(), 0).valid()) {
-        SSL_set_tlsext_host_name(m_ssl.get(), std::string{m_url.get_hostname()}.c_str());
-    }
-    SSL_set_connect_state(m_ssl.get());
-    SSL_set_quic_use_legacy_codepoint(m_ssl.get(), m_quic_version != NGTCP2_PROTO_VER_V1);
-
-#ifdef OPENSSL_IS_BORINGSSL
-    if (m_options.enable_post_quantum_cryptography) {
-        static constexpr uint16_t PQ_GROUPS[] = {
-                SSL_GROUP_X25519_MLKEM768,
-                SSL_GROUP_X25519,
-                SSL_GROUP_SECP256R1,
-                SSL_GROUP_SECP384R1,
-        };
-        if (!SSL_set1_group_ids(m_ssl.get(), PQ_GROUPS, std::size(PQ_GROUPS))) {
-            warnlog(m_log, "Failed to set post-quantum groups, continuing with defaults");
-        } else {
-            tracelog(m_log, "Post-quantum cryptography enabled (ML-KEM-768)");
-        }
-    }
-#endif // OPENSSL_IS_BORINGSSL
-
     std::string alpn;
     std::string printable;
     for (auto &dq_alpn : DQ_ALPNS) {
@@ -925,16 +947,42 @@ int DoqUpstream::init_ssl() {
         printable.append(dq_alpn);
     }
     dbglog(m_log, "Advertised ALPNs:{}", printable);
-    SSL_set_alpn_protos(m_ssl.get(), (uint8_t *) alpn.data(), alpn.size());
 
-    m_tls_session_cache.prepare_ssl(m_ssl.get());
-
-    if (SslSessionPtr session = m_tls_session_cache.get_session()) {
+    std::string hostname{m_url.get_hostname()};
+    // The session is consumed by `make_ssl()`, which up-refs it.
+    SslSessionPtr session = m_tls_session_cache.get_session();
+    if (session != nullptr) {
         dbglog(m_log, "Using a cached TLS session");
-        SSL_set_session(m_ssl.get(), session.get()); // UpRefs the session
     } else {
         dbglog(m_log, "No cached TLS sessions available");
     }
+
+    // Imitate Chrome's ClientHello so that our TLS fingerprint is not distinguishable from a
+    // browser's. `make_ssl()` also takes care of the SNI,
+    // the ALPN list, the key share groups and putting the connection into the client state.
+    std::variant<tls::SslPtr, std::string> ssl = tls::make_ssl({
+            .profile = tls::TlsClientProfile::CHROME,
+            .protocol = tls::SslProtocol::NGTCP2,
+            .alpn_protos = {(const uint8_t *) alpn.data(), alpn.size()},
+            .sni = hostname.c_str(),
+            .verify_callback = DoqUpstream::ssl_verify_callback,
+            .verify_arg = this,
+            .post_quantum = m_options.enable_post_quantum_cryptography,
+            .new_session_cb = TlsSessionCache::session_new_cb,
+            .resume_session = session.get(),
+    });
+    if (const auto *error = std::get_if<std::string>(&ssl)) {
+        errlog(m_log, "Failed to create SSL: {}", *error);
+        return 1;
+    }
+    m_ssl = std::move(std::get<tls::SslPtr>(ssl));
+
+    // `make_ssl()` installs ngtcp2's own `SSL_QUIC_METHOD`; we drive ngtcp2 ourselves, so put
+    // our hooks back. In particular, ours turns a TLS alert into an ngtcp2 connection error.
+    SSL_set_quic_method(m_ssl.get(), &quic_method);
+    SSL_set_app_data(m_ssl.get(), this);
+    SSL_set_quic_use_legacy_codepoint(m_ssl.get(), m_quic_version != NGTCP2_PROTO_VER_V1);
+    m_tls_session_cache.prepare_ssl(m_ssl.get());
 
     return 0;
 }
@@ -942,6 +990,11 @@ int DoqUpstream::init_ssl() {
 void DoqUpstream::write_client_handshake(ngtcp2_encryption_level level, const uint8_t *data, size_t datalen) {
     if (!m_conn) {
         return;
+    }
+    if (level == NGTCP2_ENCRYPTION_LEVEL_INITIAL) {
+        // The Initial flight is now being produced; cache it for replay on
+        // sockets that connect after the first one (see on_socket_connected).
+        m_initial_flight_pending = true;
     }
     auto &crypto = m_crypto[level];
     crypto.data.emplace_back(data, datalen);
@@ -960,11 +1013,13 @@ int DoqUpstream::feed_data(Uint8View data) {
 
     ngtcp2_pkt_info pi{};
     auto rv = ngtcp2_conn_read_pkt(m_conn, &path, &pi, data.data(), data.size(), initial_ts);
-
-    if (rv != 0 && rv != NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
-        if (rv != NGTCP2_ERR_CALLBACK_FAILURE) {
-            dbglog(m_log, "ngtcp2_conn_read_pkt: {}", ngtcp2_strerror(rv));
-        }
+    if (rv == 0 || rv == NGTCP2_ERR_RECV_VERSION_NEGOTIATION) {
+        // A valid server packet proves this path works; the Initial flight no
+        // longer needs replaying on other sockets.
+        m_initial_flight.clear();
+        m_initial_flight_pending = false;
+    } else if (rv != NGTCP2_ERR_CALLBACK_FAILURE) {
+        dbglog(m_log, "ngtcp2_conn_read_pkt: {}", ngtcp2_strerror(rv));
     }
 
     return rv;
@@ -1243,6 +1298,8 @@ void DoqUpstream::disconnect(std::string_view reason) {
 
     dbglog(m_log, "Disconnect reason: {}", reason);
     ngtcp2_conn_del(std::exchange(m_conn, nullptr));
+    m_initial_flight.clear();
+    m_initial_flight_pending = false;
     uv_timer_stop(m_handshake_timer->raw());
     uv_timer_stop(m_req_idle_timer->raw());
     uv_timer_stop(m_retransmit_timer->raw());

@@ -93,18 +93,25 @@ static void log_packet(
         return;
     }
 
-    ldns_buffer *str_dns = ldns_buffer_new(LDNS_MAX_PACKETLEN);
-    ldns_status status = ldns_pkt2buffer_str(str_dns, packet);
+    ldns_buffer_ptr str_dns{ldns_buffer_new(LDNS_MAX_PACKETLEN)};
+    // Bail out early if the buffer allocation failed: this is debug-only
+    // logging, and ldns_pkt2buffer_str would dereference the null buffer inside
+    // ldns and crash otherwise.
+    if (str_dns == nullptr) {
+        dbglog_id(log, packet, "Failed to allocate buffer to print {}", pkt_name);
+        return;
+    }
+    ldns_status status = ldns_pkt2buffer_str(str_dns.get(), packet);
     if (status != LDNS_STATUS_OK) {
         dbglog_id(log, packet, "Failed to print {}: {} ({})", pkt_name, ldns_get_errorstr_by_id(status),
                 magic_enum::enum_name(status));
     } else if (info) {
         dbglog_id(log, packet, "{} from {} over {}:\n{}", pkt_name, info->peername.str(),
-                magic_enum::enum_name<utils::TransportProtocol>(info->proto), (char *) ldns_buffer_begin(str_dns));
+                magic_enum::enum_name<utils::TransportProtocol>(info->proto),
+                (char *) ldns_buffer_begin(str_dns.get()));
     } else {
-        dbglog_id(log, packet, "{}:\n{}", pkt_name, (char *) ldns_buffer_begin(str_dns));
+        dbglog_id(log, packet, "{}:\n{}", pkt_name, (char *) ldns_buffer_begin(str_dns.get()));
     }
-    ldns_buffer_free(str_dns);
 }
 #else
 static void log_packet(
@@ -310,12 +317,22 @@ coro::Task<ldns_pkt_ptr> DnsForwarder::try_dns64_aaaa_synthesis(Upstream *upstre
 }
 
 static Uint8Vector transform_response_to_raw_data(const ldns_pkt *response) {
-    ldns_buffer *buffer = ldns_buffer_new(LDNS_MAX_PACKETLEN);
-    ldns_status status = ldns_pkt2buffer_wire(buffer, response);
-    assert(status == LDNS_STATUS_OK);
+    ldns_buffer_ptr buffer{ldns_buffer_new(LDNS_MAX_PACKETLEN)};
+    // Return an empty reply (graceful degradation) instead of dereferencing a
+    // null buffer or proceeding with ldns's leftover buffer state when encoding
+    // fails (the assert below is debug-only and compiled out in release builds).
+    if (buffer == nullptr) {
+        assert(0);
+        return {};
+    }
+    ldns_status status = ldns_pkt2buffer_wire(buffer.get(), response);
+    if (status != LDNS_STATUS_OK) {
+        assert(0);
+        return {};
+    }
     // @todo: custom allocator will allow to avoid data copy
-    Uint8Vector data = {ldns_buffer_at(buffer, 0), ldns_buffer_at(buffer, 0) + ldns_buffer_position(buffer)};
-    ldns_buffer_free(buffer);
+    Uint8Vector data = {
+            ldns_buffer_at(buffer.get(), 0), ldns_buffer_at(buffer.get(), 0) + ldns_buffer_position(buffer.get())};
     return data;
 }
 
@@ -325,7 +342,7 @@ DnsForwarder::~DnsForwarder() = default;
 
 static coro::Task<void> discover_dns64_prefixes(std::vector<UpstreamOptions> uss, Millis timeout,
         std::shared_ptr<SocketFactory> socket_factory, dns64::StatePtr state, EventLoop &loop, uint32_t max_tries,
-        Millis wait_time, std::weak_ptr<bool> shutdown_guard);
+        Millis wait_time, std::weak_ptr<bool> shutdown_guard, const DnsProxyEvents *events);
 
 Error<DnsProxyInitError> DnsForwarder::init(EventLoopPtr loop, const DnsProxySettings &settings,
         const DnsProxyEvents &events, std::shared_ptr<DnsFilterManager> filter_manager) {
@@ -425,7 +442,8 @@ Error<DnsProxyInitError> DnsForwarder::init(EventLoopPtr loop, const DnsProxySet
         } else {
             infolog(m_log, "DNS64 discovery is enabled");
             coro::run_detached(discover_dns64_prefixes(settings.dns64->upstreams, settings.dns64->timeout, m_socket_factory,
-                    m_dns64_state, *m_loop, settings.dns64->max_tries, settings.dns64->wait_time, m_shutdown_guard));
+                    m_dns64_state, *m_loop, settings.dns64->max_tries, settings.dns64->wait_time, m_shutdown_guard,
+                    m_events));
         }
     }
 
@@ -439,8 +457,17 @@ Error<DnsProxyInitError> DnsForwarder::init(EventLoopPtr loop, const DnsProxySet
 
 static coro::Task<void> discover_dns64_prefixes(std::vector<UpstreamOptions> uss, Millis timeout,
         std::shared_ptr<SocketFactory> socket_factory, dns64::StatePtr state, EventLoop &loop, uint32_t max_tries,
-        Millis wait_time, std::weak_ptr<bool> shutdown_guard) {
+        Millis wait_time, std::weak_ptr<bool> shutdown_guard, const DnsProxyEvents *events) {
     static ag::Logger logger{"DNS64"};
+    // Fire the discovery-completion callback on every natural exit (success or
+    // exhaustion of retries). Not fired on the shutdown-guard early exits: by
+    // then the proxy is being torn down and calling into a test's promise would
+    // be unsafe.
+    auto fire_done = [&] {
+        if (events != nullptr && events->on_dns64_discovered) {
+            events->on_dns64_discovered(state->prefixes);
+        }
+    };
     co_await loop.co_submit();
     if (shutdown_guard.expired()) {
         co_return;
@@ -480,11 +507,13 @@ static coro::Task<void> discover_dns64_prefixes(std::vector<UpstreamOptions> uss
             state->prefixes = std::move(result.value());
 
             infolog(logger, "Prefixes discovered: {}", state->prefixes.size());
+            fire_done();
             co_return;
         }
     }
 
     dbglog(logger, "Failed to discover any prefixes");
+    fire_done();
 }
 
 void DnsForwarder::update_filter_manager(std::shared_ptr<DnsFilterManager> filter_manager) {
@@ -1271,6 +1300,9 @@ coro::Task<void> DnsForwarder::optimistic_cache_background_resolve(ldns_pkt_ptr 
     } else {
         log_packet(m_log, res->get(), "Async upstream exchange result");
         m_response_cache.put(req.get(), std::move(res.value()), upstream->options().id);
+    }
+    if (m_events != nullptr && m_events->on_cache_updated) {
+        m_events->on_cache_updated(std::move(normalized_domain));
     }
     co_return;
 }

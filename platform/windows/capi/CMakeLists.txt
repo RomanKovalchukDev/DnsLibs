@@ -4,6 +4,9 @@ if(NOT CMAKE_INSTALL_PREFIX MATCHES "conan2")
 endif()
 project(AdguardDns C CXX)
 
+# Resolve the project version and generate the version resource from its template.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/version.cmake)
+
 set(CMAKE_POLICY_DEFAULT_CMP0063 NEW) # allows visibility=hidden for static targets for subprojects
 cmake_policy(SET CMP0063 NEW) # allows visibility=hidden for static targets for this project
 
@@ -48,8 +51,16 @@ if (MSVC)
         string(REPLACE "/EHsc" "" ${CompilerFlag} "${${CompilerFlag}}")
     endforeach ()
 
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MT /Zi /EHs-c-")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MT /Zi /EHs-c-")
+    # Route cl.exe through sccache when a compiler launcher is configured
+    # (CI passes -DCMAKE_*_COMPILER_LAUNCHER=sccache). The shared module
+    # switches MSVC's debug info from /Zi to /Z7 to avoid C1041 PDB
+    # contention under parallel ninja and exposes AG_MSVC_DEBUG_INFO_FORMAT
+    # for the explicit flag lines below. See cmake/sccache_msvc.cmake for
+    # the full rationale.
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/sccache_msvc.cmake)
+
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MT ${AG_MSVC_DEBUG_INFO_FORMAT} /EHs-c-")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MT ${AG_MSVC_DEBUG_INFO_FORMAT} /EHs-c-")
 else ()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-strict-aliasing -fno-exceptions")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing -fno-exceptions")
@@ -79,10 +90,15 @@ if (NOT TARGET dnsproxy)
 endif ()
 
 set(SOURCE_FILES
+        src/throw_hook.cpp
         src/ag_dns.cpp)
 
+configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ag_dns.rc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/gen/ag_dns.rc
+        @ONLY)
 set(RES_FILES
-        src/ag_dns.rc)
+        ${CMAKE_CURRENT_BINARY_DIR}/gen/ag_dns.rc)
 
 
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
